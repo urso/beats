@@ -47,9 +47,32 @@ func NewHarvester(
 	return h, nil
 }
 
+func createLineReader(
+	in io.Reader,
+	codec encoding.Encoding,
+	bufferSize int,
+	mlrConfig *config.MultilineConfig,
+) (lineReader, error) {
+	var reader lineReader
+	var err error
+
+	reader, err = encoding.NewLineReader(in, codec, bufferSize)
+	if err != nil {
+		return nil, err
+	}
+
+	if mlrConfig != nil {
+		reader, err = newMultilineReader(reader, mlrConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return newNoEOLLineReader(reader), nil
+}
+
 // Log harvester reads files line by line and sends events to the defined output
 func (h *Harvester) Harvest() {
-
 	defer func() {
 		// On completion, push offset so we can continue where we left off if we relaunch on the same file
 		h.Stat.Return <- h.Offset
@@ -80,7 +103,8 @@ func (h *Harvester) Harvest() {
 	//       for new lines in input stream. Simple 8-bit based encodings, or plain
 	//       don't require 'complicated' logic.
 	timedIn := newTimedReader(h.file)
-	reader, err := encoding.NewLineReader(timedIn, enc, h.Config.BufferSize)
+	config := h.Config
+	reader, err := createLineReader(timedIn, enc, config.BufferSize, config.Multiline)
 	if err != nil {
 		logp.Err("Stop Harvesting. Unexpected encoding line reader error: %s", err)
 		return
@@ -114,7 +138,6 @@ func (h *Harvester) Harvest() {
 		h.backoff = h.Config.BackoffDuration
 
 		if h.shouldExportLine(text) {
-
 			// Sends text to spooler
 			event := &input.FileEvent{
 				ReadTime:     lastReadTime,
@@ -332,36 +355,3 @@ func (h *Harvester) Stop() {
 }
 
 const maxConsecutiveEmptyReads = 100
-
-// timedReader keeps track of last time bytes have been read from underlying
-// reader.
-type timedReader struct {
-	reader       io.Reader
-	lastReadTime time.Time // last time we read some data from input stream
-}
-
-func newTimedReader(reader io.Reader) *timedReader {
-	r := &timedReader{
-		reader: reader,
-	}
-	return r
-}
-
-func (r *timedReader) Read(p []byte) (int, error) {
-	var err error
-	n := 0
-
-	for i := maxConsecutiveEmptyReads; i > 0; i-- {
-		n, err = r.reader.Read(p)
-		if n > 0 {
-			r.lastReadTime = time.Now()
-			break
-		}
-
-		if err != nil {
-			break
-		}
-	}
-
-	return n, err
-}

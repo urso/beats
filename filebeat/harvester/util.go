@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/elastic/beats/filebeat/harvester/encoding"
 	"github.com/elastic/beats/libbeat/logp"
 )
 
@@ -41,7 +40,7 @@ func lineEndingChars(line []byte) int {
 // In case of partial lines, readLine does return and error and en empty string
 // This could potentialy be improved / replaced by https://github.com/elastic/beats/libbeat/tree/master/common/streambuf
 func readLine(
-	reader *encoding.LineReader,
+	reader lineReader,
 	lastReadTime *time.Time,
 ) (string, int, error) {
 	for {
@@ -50,17 +49,11 @@ func readLine(
 		// Full line read to be returned
 		if size != 0 && err == nil {
 			logp.Debug("harvester", "full line read")
-			return readlineString(line, size)
-		} else {
-			return "", 0, err
+			return string(line), size, err
 		}
-	}
-}
 
-// readlineString removes line ending characters from given by array.
-func readlineString(bytes []byte, size int) (string, int, error) {
-	s := string(bytes)[:len(bytes)-lineEndingChars(bytes)]
-	return s, size, nil
+		return "", 0, err
+	}
 }
 
 // InitRegexps initializes a list of compiled regular expressions.
