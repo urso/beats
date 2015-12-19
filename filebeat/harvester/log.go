@@ -102,9 +102,8 @@ func (h *Harvester) Harvest() {
 	// TODO: NewLineReader uses additional buffering to deal with encoding and testing
 	//       for new lines in input stream. Simple 8-bit based encodings, or plain
 	//       don't require 'complicated' logic.
-	timedIn := newTimedReader(h.file)
 	config := h.Config
-	reader, err := createLineReader(timedIn, enc, config.BufferSize, config.Multiline)
+	reader, err := createLineReader(h.file, enc, config.BufferSize, config.Multiline)
 	if err != nil {
 		logp.Err("Stop Harvesting. Unexpected encoding line reader error: %s", err)
 		return
@@ -116,7 +115,7 @@ func (h *Harvester) Harvest() {
 
 	for {
 		// Partial lines return error and are only read on completion
-		text, bytesRead, err := readLine(reader, &timedIn.lastReadTime)
+		text, bytesRead, err := readLine(reader)
 
 		if err != nil {
 

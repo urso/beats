@@ -54,26 +54,25 @@ func TestReadLine(t *testing.T) {
 	assert.NotNil(t, h)
 
 	// Read only 10 bytes which is not the end of the file
-	timedIn := newTimedReader(readFile)
 	codec, _ := encoding.Plain(file)
-	reader, _ := createLineReader(timedIn, codec, 100)
+	reader, _ := createLineReader(readFile, codec, 100, nil)
 
 	// Read third line
-	text, bytesread, err := readLine(reader, &timedIn.lastReadTime)
+	text, bytesread, err := readLine(reader)
 
 	assert.Nil(t, err)
 	assert.Equal(t, text, firstLineString[0:len(firstLineString)-1])
 	assert.Equal(t, bytesread, len(firstLineString))
 
 	// read second line
-	text, bytesread, err = readLine(reader, &timedIn.lastReadTime)
+	text, bytesread, err = readLine(reader)
 
 	assert.Equal(t, text, secondLineString[0:len(secondLineString)-1])
 	assert.Equal(t, bytesread, len(secondLineString))
 	assert.Nil(t, err)
 
 	// Read third line, which doesn't exist
-	text, bytesread, err = readLine(reader, &timedIn.lastReadTime)
+	text, bytesread, err = readLine(reader)
 	assert.Equal(t, "", text)
 	assert.Equal(t, bytesread, 0)
 	assert.Equal(t, err, io.EOF)
