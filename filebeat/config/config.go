@@ -77,8 +77,8 @@ type MultilineConfig struct {
 	Pattern  string `yaml:"pattern"`
 	Negate   bool   `yaml:"negate"`
 	Match    string `yaml:"match"`
-	MaxLines int    `yaml:"max_lines"`
-	MaxBytes int    `yaml:"max_bytes"`
+	MaxLines *int   `yaml:"max_lines"`
+	MaxBytes *int   `yaml:"max_bytes"`
 }
 
 const (

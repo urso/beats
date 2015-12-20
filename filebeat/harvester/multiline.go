@@ -8,19 +8,24 @@ import (
 )
 
 type multiLineReader struct {
-	reader lineReader
-	pred   matcher
+	reader   lineReader
+	pred     matcher
+	maxBytes int // bytes stored in content
+	maxLines int
 
 	content   []byte
 	last      []byte
-	maxBytes  int // bytes stored in content
-	maxLines  int
 	readBytes int // bytes as read from input source
 	numLines  int
 
 	err   error // last seen error
 	state func(*multiLineReader) ([]byte, int, error)
 }
+
+const (
+	defaultMaxBytes = 10 * (1 << 20) // 10MB
+	defaultMaxLines = 500
+)
 
 type matcher func(last, current []byte) bool
 
@@ -48,10 +53,22 @@ func newMultilineReader(
 		matcher = negatedMatcher(matcher)
 	}
 
+	maxBytes := defaultMaxBytes
+	if config.MaxBytes != nil {
+		maxBytes = *config.MaxBytes
+	}
+
+	maxLines := defaultMaxLines
+	if config.MaxLines != nil {
+		maxLines = *config.MaxLines
+	}
+
 	mlr := &multiLineReader{
-		reader: r,
-		pred:   matcher,
-		state:  (*multiLineReader).readNext,
+		reader:   r,
+		pred:     matcher,
+		state:    (*multiLineReader).readNext,
+		maxBytes: maxBytes,
+		maxLines: maxLines,
 	}
 	return mlr, nil
 }
@@ -141,8 +158,8 @@ func (mlr *multiLineReader) addLine(line []byte, sz int) {
 	}
 
 	space := mlr.maxBytes - len(mlr.content)
-	if space > 0 && mlr.numLines < mlr.maxLines {
-		if space > len(line) {
+	if (mlr.maxBytes <= 0 || space > 0) && (mlr.maxLines <= 0 || mlr.numLines < mlr.maxLines) {
+		if space < 0 || space > len(line) {
 			space = len(line)
 		}
 		mlr.content = append(mlr.content, line[:space]...)
@@ -180,7 +197,8 @@ func genPatternMatcher(pattern string, sel func(last, current []byte) []byte) (m
 	}
 
 	matcher := func(last, current []byte) bool {
-		return reg.Match(sel(last, current))
+		line := sel(last, current)
+		return reg.Match(line)
 	}
 	return matcher, nil
 }
