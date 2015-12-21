@@ -2,13 +2,22 @@ package harvester
 
 import (
 	"bytes"
-	"io"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/elastic/beats/filebeat/config"
 	"github.com/elastic/beats/filebeat/harvester/encoding"
 	"github.com/stretchr/testify/assert"
 )
+
+type bufferSource struct{ buf *bytes.Buffer }
+
+func (p bufferSource) Read(b []byte) (int, error) { return p.buf.Read(b) }
+func (p bufferSource) Close() error               { return nil }
+func (p bufferSource) Name() string               { return "buffer" }
+func (p bufferSource) Stat() (os.FileInfo, error) { return nil, errors.New("unknown") }
+func (p bufferSource) Continuable() bool          { return false }
 
 func TestMultilineAfterOK(t *testing.T) {
 	testMultilineOK(t,
@@ -83,7 +92,7 @@ func testMultilineOK(t *testing.T, cfg config.MultilineConfig, expected ...strin
 	}
 }
 
-func createMultilineTestReader(t *testing.T, in io.Reader, cfg config.MultilineConfig) lineReader {
+func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.MultilineConfig) lineReader {
 	encFactory, ok := encoding.FindEncoding("plain")
 	if !ok {
 		t.Fatalf("unable to find 'plain' encoding")
@@ -94,7 +103,7 @@ func createMultilineTestReader(t *testing.T, in io.Reader, cfg config.MultilineC
 		t.Fatalf("failed to initialize encoding: %v", err)
 	}
 
-	reader, err := createLineReader(in, enc, 1024, &cfg)
+	reader, err := createLineReader(bufferSource{in}, enc, 1024, logFileReaderConfig{}, &cfg)
 	if err != nil {
 		t.Fatalf("failed to initializ reader: %v", err)
 	}

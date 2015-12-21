@@ -1,12 +1,13 @@
 package harvester
 
 import (
-	"io"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/elastic/beats/filebeat/harvester/encoding"
 	"github.com/stretchr/testify/assert"
@@ -55,27 +56,34 @@ func TestReadLine(t *testing.T) {
 
 	// Read only 10 bytes which is not the end of the file
 	codec, _ := encoding.Plain(file)
-	reader, _ := createLineReader(readFile, codec, 100, nil)
+	readConfig := logFileReaderConfig{
+		maxInactive:        500 * time.Millisecond,
+		backoffDuration:    100 * time.Millisecond,
+		maxBackoffDuration: 1 * time.Second,
+		backoffFactor:      2,
+	}
+	reader, _ := createLineReader(fileSource{readFile}, codec, 100, readConfig, nil)
 
 	// Read third line
 	text, bytesread, err := readLine(reader)
-
+	fmt.Printf("received line: '%s'\n", text)
 	assert.Nil(t, err)
 	assert.Equal(t, text, firstLineString[0:len(firstLineString)-1])
 	assert.Equal(t, bytesread, len(firstLineString))
 
 	// read second line
 	text, bytesread, err = readLine(reader)
-
+	fmt.Printf("received line: '%s'\n", text)
 	assert.Equal(t, text, secondLineString[0:len(secondLineString)-1])
 	assert.Equal(t, bytesread, len(secondLineString))
 	assert.Nil(t, err)
 
 	// Read third line, which doesn't exist
 	text, bytesread, err = readLine(reader)
+	fmt.Printf("received line: '%s'\n", text)
 	assert.Equal(t, "", text)
 	assert.Equal(t, bytesread, 0)
-	assert.Equal(t, err, io.EOF)
+	assert.Equal(t, err, errInactive)
 }
 
 func TestIsLine(t *testing.T) {

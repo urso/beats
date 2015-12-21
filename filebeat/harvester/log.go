@@ -48,15 +48,21 @@ func NewHarvester(
 }
 
 func createLineReader(
-	in io.Reader,
+	in FileSource,
 	codec encoding.Encoding,
 	bufferSize int,
+	readerConfig logFileReaderConfig,
 	mlrConfig *config.MultilineConfig,
 ) (lineReader, error) {
 	var reader lineReader
 	var err error
 
-	reader, err = encoding.NewLineReader(in, codec, bufferSize)
+	fileReader, err := newLogFileReader(in, readerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err = encoding.NewLineReader(fileReader, codec, bufferSize)
 	if err != nil {
 		return nil, err
 	}
@@ -103,43 +109,45 @@ func (h *Harvester) Harvest() {
 	//       for new lines in input stream. Simple 8-bit based encodings, or plain
 	//       don't require 'complicated' logic.
 	config := h.Config
-	reader, err := createLineReader(h.file, enc, config.BufferSize, config.Multiline)
+	readerConfig := logFileReaderConfig{
+		forceClose:         config.ForceCloseFiles,
+		maxInactive:        h.ProspectorConfig.IgnoreOlderDuration,
+		backoffDuration:    config.BackoffDuration,
+		maxBackoffDuration: config.MaxBackoffDuration,
+		backoffFactor:      config.BackoffFactor,
+	}
+	reader, err := createLineReader(h.file, enc, config.BufferSize, readerConfig, config.Multiline)
 	if err != nil {
 		logp.Err("Stop Harvesting. Unexpected encoding line reader error: %s", err)
 		return
 	}
 
-	// XXX: lastReadTime handling last time a full line was read only?
-	//      timedReader provides timestamp some bytes have actually been read from file
-	lastReadTime := time.Now()
-
 	for {
 		// Partial lines return error and are only read on completion
 		text, bytesRead, err := readLine(reader)
-
 		if err != nil {
+			if err == errFileTruncate {
+				seeker, ok := h.file.(io.Seeker)
+				if !ok {
+					logp.Err("can not seek source")
+					return
+				}
 
-			// In case of err = io.EOF returns nil
-			err = h.handleReadlineError(lastReadTime, err)
+				logp.Debug("harvester", "File was truncated. Begin reading file from offset 0: %s", h.Path)
 
-			// Return in case of error which leads to stopping harvester and closing file
-			if err != nil {
-				logp.Info("Read line error: %s", err)
-				return
+				h.Offset = 0
+				seeker.Seek(h.Offset, os.SEEK_SET)
+				continue
 			}
 
-			continue
+			logp.Info("Read line error: %s", err)
+			return
 		}
-
-		lastReadTime = time.Now()
-
-		// Reset Backoff
-		h.backoff = h.Config.BackoffDuration
 
 		if h.shouldExportLine(text) {
 			// Sends text to spooler
 			event := &input.FileEvent{
-				ReadTime:     lastReadTime,
+				ReadTime:     time.Now(),
 				Source:       &h.Path,
 				InputType:    h.Config.InputType,
 				DocumentType: h.Config.DocumentType,
@@ -272,82 +280,11 @@ func (h *Harvester) initFileOffset(file *os.File) error {
 	} else {
 		// get offset from file in case of encoding factory was
 		// required to read some data.
-
 		logp.Debug("harvester", "harvest: %q (offset snapshot:%d)", h.Path, offset)
 		h.Offset = offset
 	}
 
 	return err
-}
-
-// handleReadlineError handles error which are raised during reading file.
-//
-// If error is EOF, it will check for:
-// * File truncated
-// * Older then ignore_older
-// * General file error
-//
-// If none of the above cases match, no error will be returned and file is kept open
-//
-// In case of a general error, the error itself is returned
-func (h *Harvester) handleReadlineError(lastTimeRead time.Time, err error) error {
-	if err != io.EOF || !h.file.Continuable() {
-		logp.Err("Unexpected state reading from %s; error: %s", h.Path, err)
-		return err
-	}
-
-	// Refetch fileinfo to check if the file was truncated or disappeared.
-	// Errors if the file was removed/rotated after reading and before
-	// calling the stat function
-	info, statErr := h.file.Stat()
-	if statErr != nil {
-		logp.Err("Unexpected error reading from %s; error: %s", h.Path, statErr)
-		return statErr
-	}
-
-	// Handle fails if file was truncated
-	if info.Size() < h.Offset {
-		seeker, ok := h.file.(io.Seeker)
-		if !ok {
-			logp.Err("Can not seek source")
-			return err
-		}
-
-		logp.Debug("harvester", "File was truncated as offset (%s) > size (%s). Begin reading file from offset 0: %s", h.Offset, info.Size(), h.Path)
-
-		h.Offset = 0
-		seeker.Seek(h.Offset, os.SEEK_SET)
-		return nil
-	}
-
-	age := time.Since(lastTimeRead)
-	if age > h.ProspectorConfig.IgnoreOlderDuration {
-		// If the file hasn't change for longer the ignore_older, harvester stops
-		// and file handle will be closed.
-		return fmt.Errorf("Stop harvesting as file is older then ignore_older: %s; Last change was: %s ", h.Path, age)
-	}
-
-	if h.Config.ForceCloseFiles {
-		// Check if the file name exists (see #93)
-		_, statErr := os.Stat(h.file.Name())
-
-		// Error means file does not exist. If no error, check if same file. If not close as rotated.
-		if statErr != nil || !input.IsSameFile(h.file.Name(), info) {
-			logp.Info("Force close file: %s; error: %s", h.Path, statErr)
-			// Return directly on windows -> file is closing
-			return fmt.Errorf("Force closing file: %s", h.Path)
-		}
-	}
-
-	if err != io.EOF {
-		logp.Err("Unexpected state reading from %s; error: %s", h.Path, err)
-	}
-
-	logp.Debug("harvester", "End of file reached: %s; Backoff now.", h.Path)
-
-	// Do nothing in case it is just EOF, keep reading the file after backing off
-	h.backOff()
-	return nil
 }
 
 func (h *Harvester) Stop() {
