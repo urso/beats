@@ -30,6 +30,21 @@ type logFileReader struct {
 	backoff      time.Duration
 }
 
+type timeoutLineReader struct {
+	reader  lineReader
+	timeout time.Duration
+	signal  error
+
+	running bool
+	ch      chan lineMessage
+}
+
+type lineMessage struct {
+	line []byte
+	sz   int
+	err  error
+}
+
 type logFileReaderConfig struct {
 	forceClose         bool
 	maxInactive        time.Duration
@@ -42,6 +57,7 @@ var (
 	errFileTruncate = errors.New("detected file being truncated")
 	errForceClose   = errors.New("file must be closed")
 	errInactive     = errors.New("file inactive")
+	errTimeout      = errors.New("timeout")
 )
 
 func newNoEOLLineReader(r lineReader) *noEOLLineReader {
@@ -184,5 +200,43 @@ func (r *logFileReader) wait() {
 		if r.backoff > r.config.maxBackoffDuration {
 			r.backoff = r.config.maxBackoffDuration
 		}
+	}
+}
+
+func newTimeoutLineReader(in lineReader, signal error, timeout time.Duration) *timeoutLineReader {
+	if signal == nil {
+		signal = errTimeout
+	}
+
+	return &timeoutLineReader{
+		reader:  in,
+		signal:  signal,
+		timeout: timeout,
+		ch:      make(chan lineMessage, 1),
+	}
+}
+
+func (tr *timeoutLineReader) Next() ([]byte, int, error) {
+	if !tr.running {
+		tr.running = true
+		go func() {
+			for {
+				line, sz, err := tr.reader.Next()
+				tr.ch <- lineMessage{line, sz, err}
+				if err != nil {
+					break
+				}
+			}
+		}()
+	}
+
+	select {
+	case msg := <-tr.ch:
+		if msg.err != nil {
+			tr.running = false
+		}
+		return msg.line, msg.sz, msg.err
+	case <-time.After(tr.timeout):
+		return nil, 0, tr.signal
 	}
 }

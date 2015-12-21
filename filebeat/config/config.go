@@ -79,6 +79,7 @@ type MultilineConfig struct {
 	Match    string `yaml:"match"`
 	MaxLines *int   `yaml:"max_lines"`
 	MaxBytes *int   `yaml:"max_bytes"`
+	Timeout  string `yaml:"timeout"`
 }
 
 const (

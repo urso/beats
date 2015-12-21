@@ -1,8 +1,10 @@
 package harvester
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/elastic/beats/filebeat/config"
 )
@@ -28,6 +30,10 @@ const (
 )
 
 type matcher func(last, current []byte) bool
+
+var (
+	errMultilineTimeout = errors.New("multline timeout")
+)
 
 func newMultilineReader(
 	r lineReader,
@@ -63,6 +69,17 @@ func newMultilineReader(
 		maxLines = *config.MaxLines
 	}
 
+	if config.Timeout != "" {
+		timeout, err := time.ParseDuration(config.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse duration '%s': %v", config.Timeout, err)
+		}
+		if timeout < 0 {
+			return nil, fmt.Errorf("timeout %v must not be negative", config.Timeout)
+		}
+		r = newTimeoutLineReader(r, errMultilineTimeout, timeout)
+	}
+
 	mlr := &multiLineReader{
 		reader:   r,
 		pred:     matcher,
@@ -81,6 +98,18 @@ func (mlr *multiLineReader) readNext() ([]byte, int, error) {
 	for {
 		line, sz, err := mlr.reader.Next()
 		if err != nil {
+			// handle multiline timeout signal
+			if err == errMultilineTimeout {
+				// no lines buffered -> ignore timeout
+				if mlr.numLines == 0 {
+					continue
+				}
+
+				// return collected multiline event and empty buffer for new multiline event
+				line, sz := mlr.pushLine()
+				return line, sz, nil
+			}
+
 			// handle error without any bytes returned from reader
 			if sz == 0 {
 				// no lines buffered -> return error
