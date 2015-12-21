@@ -34,7 +34,6 @@ func NewHarvester(
 		Stat:             stat,
 		SpoolerChan:      spooler,
 		encoding:         encoding,
-		backoff:          prospectorCfg.Harvester.BackoffDuration,
 	}
 	h.ExcludeLinesRegexp, err = InitRegexps(cfg.ExcludeLines)
 	if err != nil {
@@ -187,21 +186,6 @@ func (h *Harvester) shouldExportLine(line string) bool {
 
 	return true
 
-}
-
-// backOff checks the backoff variable and sleeps for the given time
-// It also recalculate and sets the next backoff duration
-func (h *Harvester) backOff() {
-	// Wait before trying to read file which reached EOF again
-	time.Sleep(h.backoff)
-
-	// Increment backoff up to maxBackoff
-	if h.backoff < h.Config.MaxBackoffDuration {
-		h.backoff = h.backoff * time.Duration(h.Config.BackoffFactor)
-		if h.backoff > h.Config.MaxBackoffDuration {
-			h.backoff = h.Config.MaxBackoffDuration
-		}
-	}
 }
 
 // open does open the file given under h.Path and assigns the file handler to h.file
