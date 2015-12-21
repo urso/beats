@@ -70,7 +70,7 @@ type HarvesterConfig struct {
 	ForceCloseFiles    bool             `yaml:"force_close_files"`
 	ExcludeLines       []string         `yaml:"exclude_lines"`
 	IncludeLines       []string         `yaml:"include_lines"`
-	Multiline          *MultilineConfig `yaml:"multi"`
+	Multiline          *MultilineConfig `yaml:"multiline"`
 }
 
 type MultilineConfig struct {
