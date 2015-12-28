@@ -58,7 +58,7 @@ func createLineReader(
 	readerConfig logFileReaderConfig,
 	mlrConfig *config.MultilineConfig,
 ) (processor.LineProcessor, error) {
-	var reader processor.LineProcessor
+	var p processor.LineProcessor
 	var err error
 
 	fileReader, err := newLogFileReader(in, readerConfig)
@@ -66,22 +66,22 @@ func createLineReader(
 		return nil, err
 	}
 
-	reader, err = processor.NewEncLineReader(fileReader, codec, bufferSize)
+	p, err = processor.NewLineSource(fileReader, codec, bufferSize)
 	if err != nil {
 		return nil, err
 	}
 
 	if mlrConfig != nil {
-		reader, err = processor.NewMultilineReader(reader, maxBytes, mlrConfig)
+		p, err = processor.NewMultiline(p, maxBytes, mlrConfig)
 		if err != nil {
 			return nil, err
 		}
 
-		return processor.NewStripNLLineProcessor(reader), nil
+		return processor.NewStripNewline(p), nil
 	}
 
-	reader = processor.NewStripNLLineProcessor(reader)
-	return processor.NewBoundedLineReader(reader, maxBytes), nil
+	p = processor.NewStripNewline(p)
+	return processor.NewLimitProcessor(p, maxBytes), nil
 }
 
 // Log harvester reads files line by line and sends events to the defined output

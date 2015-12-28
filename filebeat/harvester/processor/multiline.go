@@ -9,7 +9,7 @@ import (
 	"github.com/elastic/beats/filebeat/config"
 )
 
-type MultiLineReader struct {
+type MultiLine struct {
 	reader   LineProcessor
 	pred     matcher
 	maxBytes int // bytes stored in content
@@ -22,7 +22,7 @@ type MultiLineReader struct {
 	numLines  int
 
 	err   error // last seen error
-	state func(*MultiLineReader) (line, error)
+	state func(*MultiLine) (Line, error)
 }
 
 const (
@@ -35,10 +35,11 @@ var (
 	errMultilineTimeout = errors.New("multline timeout")
 )
 
-func NewMultilineReader(
-	r LineProcessor, maxBytes int,
+func NewMultiline(
+	r LineProcessor,
+	maxBytes int,
 	config *config.MultilineConfig,
-) (*MultiLineReader, error) {
+) (*MultiLine, error) {
 	type matcherFactory func(pattern string) (matcher, error)
 	types := map[string]matcherFactory{
 		"before": beforeMatcher,
@@ -72,24 +73,24 @@ func NewMultilineReader(
 		if timeout < 0 {
 			return nil, fmt.Errorf("timeout %v must not be negative", config.Timeout)
 		}
-		r = newTimeoutLineReader(r, errMultilineTimeout, timeout)
+		r = newTimeoutProcessor(r, errMultilineTimeout, timeout)
 	}
 
-	mlr := &MultiLineReader{
+	mlr := &MultiLine{
 		reader:   r,
 		pred:     matcher,
-		state:    (*MultiLineReader).readNext,
+		state:    (*MultiLine).readNext,
 		maxBytes: maxBytes,
 		maxLines: maxLines,
 	}
 	return mlr, nil
 }
 
-func (mlr *MultiLineReader) Next() (line, error) {
+func (mlr *MultiLine) Next() (Line, error) {
 	return mlr.state(mlr)
 }
 
-func (mlr *MultiLineReader) readNext() (line, error) {
+func (mlr *MultiLine) readNext() (Line, error) {
 	for {
 		l, err := mlr.reader.Next()
 		if err != nil {
@@ -100,7 +101,8 @@ func (mlr *MultiLineReader) readNext() (line, error) {
 					continue
 				}
 
-				// return collected multiline event and empty buffer for new multiline event
+				// return collected multiline event and
+				// empty buffer for new multiline event
 				l := mlr.pushLine()
 				return l, nil
 			}
@@ -109,13 +111,13 @@ func (mlr *MultiLineReader) readNext() (line, error) {
 			if l.Bytes == 0 {
 				// no lines buffered -> return error
 				if mlr.numLines == 0 {
-					return line{}, err
+					return Line{}, err
 				}
 
 				// lines buffered, return multiline and error on next read
 				l := mlr.pushLine()
 				mlr.err = err
-				mlr.state = (*MultiLineReader).readFailed
+				mlr.state = (*MultiLine).readFailed
 				return l, nil
 			}
 
@@ -127,7 +129,7 @@ func (mlr *MultiLineReader) readNext() (line, error) {
 				// return multiline and error on next read
 				l := mlr.pushLine()
 				mlr.err = err
-				mlr.state = (*MultiLineReader).readFailed
+				mlr.state = (*MultiLine).readFailed
 				return l, nil
 			}
 
@@ -149,22 +151,22 @@ func (mlr *MultiLineReader) readNext() (line, error) {
 	}
 }
 
-func (mlr *MultiLineReader) readFailed() (line, error) {
+func (mlr *MultiLine) readFailed() (Line, error) {
 	// return error and reset line reader
 	err := mlr.err
 	mlr.err = nil
-	mlr.state = (*MultiLineReader).readNext
-	return line{}, err
+	mlr.state = (*MultiLine).readNext
+	return Line{}, err
 }
 
-func (mlr *MultiLineReader) startNewLine(l line) line {
+func (mlr *MultiLine) startNewLine(l Line) Line {
 	retLine := mlr.pushLine()
 	mlr.addLine(l)
 	mlr.ts = l.Ts
 	return retLine
 }
 
-func (mlr *MultiLineReader) pushLine() line {
+func (mlr *MultiLine) pushLine() Line {
 	content := mlr.content
 	sz := mlr.readBytes
 
@@ -174,16 +176,18 @@ func (mlr *MultiLineReader) pushLine() line {
 	mlr.numLines = 0
 	mlr.err = nil
 
-	return line{Ts: mlr.ts, Content: content, Bytes: sz}
+	return Line{Ts: mlr.ts, Content: content, Bytes: sz}
 }
 
-func (mlr *MultiLineReader) addLine(l line) {
+func (mlr *MultiLine) addLine(l Line) {
 	if l.Bytes <= 0 {
 		return
 	}
 
 	space := mlr.maxBytes - len(mlr.content)
-	if (mlr.maxBytes <= 0 || space > 0) && (mlr.maxLines <= 0 || mlr.numLines < mlr.maxLines) {
+	spaceLeft := (mlr.maxBytes <= 0 || space > 0) &&
+		(mlr.maxLines <= 0 || mlr.numLines < mlr.maxLines)
+	if spaceLeft {
 		if space < 0 || space > len(l.Content) {
 			space = len(l.Content)
 		}
@@ -215,7 +219,10 @@ func negatedMatcher(m matcher) matcher {
 	}
 }
 
-func genPatternMatcher(pattern string, sel func(last, current []byte) []byte) (matcher, error) {
+func genPatternMatcher(
+	pattern string,
+	sel func(last, current []byte) []byte,
+) (matcher, error) {
 	reg, err := regexp.CompilePOSIX(pattern)
 	if err != nil {
 		return nil, err

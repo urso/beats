@@ -104,12 +104,12 @@ func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.Multil
 	}
 
 	var reader LineProcessor
-	reader, err = NewEncLineReader(in, enc, 4096)
+	reader, err = NewLineSource(in, enc, 4096)
 	if err != nil {
 		t.Fatalf("Failed to initialize line reader: %v", err)
 	}
 
-	reader, err = NewMultilineReader(reader, 1<<20, &cfg)
+	reader, err = NewMultiline(reader, 1<<20, &cfg)
 	if err != nil {
 		t.Fatalf("failed to initializ reader: %v", err)
 	}
