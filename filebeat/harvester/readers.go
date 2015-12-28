@@ -7,29 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/elastic/beats/filebeat/harvester/encoding"
 	"github.com/elastic/beats/filebeat/input"
 	"github.com/elastic/beats/libbeat/logp"
 )
-
-type line struct {
-	ts      time.Time
-	content []byte
-	sz      int
-}
-
-type lineReader interface {
-	Next() (line, error)
-}
-
-type encLineReader struct {
-	reader *encoding.LineReader
-}
-
-// noEOLLineReader strips last EOL from input line reader (if present).
-type noEOLLineReader struct {
-	reader lineReader
-}
 
 type logFileReader struct {
 	fs        FileSource
@@ -39,25 +19,6 @@ type logFileReader struct {
 
 	lastTimeRead time.Time
 	backoff      time.Duration
-}
-
-type boundedLineReader struct {
-	reader   lineReader
-	maxBytes int
-}
-
-type timeoutLineReader struct {
-	reader  lineReader
-	timeout time.Duration
-	signal  error
-
-	running bool
-	ch      chan lineMessage
-}
-
-type lineMessage struct {
-	line line
-	err  error
 }
 
 type logFileReaderConfig struct {
@@ -72,37 +33,7 @@ var (
 	errFileTruncate = errors.New("detected file being truncated")
 	errForceClose   = errors.New("file must be closed")
 	errInactive     = errors.New("file inactive")
-	errTimeout      = errors.New("timeout")
 )
-
-func newEncLineReader(
-	in io.Reader,
-	codec encoding.Encoding,
-	bufferSize int,
-) (encLineReader, error) {
-	r, err := encoding.NewLineReader(in, codec, bufferSize)
-	return encLineReader{r}, err
-}
-
-func (r encLineReader) Next() (line, error) {
-	c, sz, err := r.reader.Next()
-	return line{ts: time.Now(), content: c, sz: sz}, err
-}
-
-func newNoEOLLineReader(r lineReader) *noEOLLineReader {
-	return &noEOLLineReader{r}
-}
-
-func (n *noEOLLineReader) Next() (line, error) {
-	line, err := n.reader.Next()
-	if err != nil {
-		return line, err
-	}
-
-	L := line.content
-	line.content = L[:len(L)-lineEndingChars(L)]
-	return line, err
-}
 
 func newLogFileReader(
 	fs FileSource,
@@ -231,55 +162,5 @@ func (r *logFileReader) wait() {
 		if r.backoff > r.config.maxBackoffDuration {
 			r.backoff = r.config.maxBackoffDuration
 		}
-	}
-}
-
-func newBoundedLineReader(in lineReader, maxBytes int) *boundedLineReader {
-	return &boundedLineReader{reader: in, maxBytes: maxBytes}
-}
-
-func (r *boundedLineReader) Next() (line, error) {
-	line, err := r.reader.Next()
-	if len(line.content) > r.maxBytes {
-		line.content = line.content[:r.maxBytes]
-	}
-	return line, err
-}
-
-func newTimeoutLineReader(in lineReader, signal error, timeout time.Duration) *timeoutLineReader {
-	if signal == nil {
-		signal = errTimeout
-	}
-
-	return &timeoutLineReader{
-		reader:  in,
-		signal:  signal,
-		timeout: timeout,
-		ch:      make(chan lineMessage, 1),
-	}
-}
-
-func (tr *timeoutLineReader) Next() (line, error) {
-	if !tr.running {
-		tr.running = true
-		go func() {
-			for {
-				line, err := tr.reader.Next()
-				tr.ch <- lineMessage{line, err}
-				if err != nil {
-					break
-				}
-			}
-		}()
-	}
-
-	select {
-	case msg := <-tr.ch:
-		if msg.err != nil {
-			tr.running = false
-		}
-		return msg.line, msg.err
-	case <-time.After(tr.timeout):
-		return line{}, tr.signal
 	}
 }

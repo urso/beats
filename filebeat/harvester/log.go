@@ -8,6 +8,7 @@ import (
 
 	"github.com/elastic/beats/filebeat/config"
 	"github.com/elastic/beats/filebeat/harvester/encoding"
+	"github.com/elastic/beats/filebeat/harvester/processor"
 	"github.com/elastic/beats/filebeat/input"
 	"github.com/elastic/beats/libbeat/logp"
 	"golang.org/x/text/transform"
@@ -56,8 +57,8 @@ func createLineReader(
 	maxBytes int,
 	readerConfig logFileReaderConfig,
 	mlrConfig *config.MultilineConfig,
-) (lineReader, error) {
-	var reader lineReader
+) (processor.LineProcessor, error) {
+	var reader processor.LineProcessor
 	var err error
 
 	fileReader, err := newLogFileReader(in, readerConfig)
@@ -65,21 +66,22 @@ func createLineReader(
 		return nil, err
 	}
 
-	reader, err = newEncLineReader(fileReader, codec, bufferSize)
+	reader, err = processor.NewEncLineReader(fileReader, codec, bufferSize)
 	if err != nil {
 		return nil, err
 	}
 
 	if mlrConfig != nil {
-		reader, err = newMultilineReader(reader, maxBytes, mlrConfig)
+		reader, err = processor.NewMultilineReader(reader, maxBytes, mlrConfig)
 		if err != nil {
 			return nil, err
 		}
 
-		return newNoEOLLineReader(reader), nil
+		return processor.NewStripNLLineProcessor(reader), nil
 	}
 
-	return newBoundedLineReader(newNoEOLLineReader(reader), maxBytes), nil
+	reader = processor.NewStripNLLineProcessor(reader)
+	return processor.NewBoundedLineReader(reader, maxBytes), nil
 }
 
 // Log harvester reads files line by line and sends events to the defined output

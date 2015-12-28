@@ -1,4 +1,4 @@
-package harvester
+package processor
 
 import (
 	"bytes"
@@ -77,8 +77,8 @@ func testMultilineOK(t *testing.T, cfg config.MultilineConfig, expected ...strin
 			break
 		}
 
-		lines = append(lines, string(line.content))
-		sizes = append(sizes, line.sz)
+		lines = append(lines, string(line.Content))
+		sizes = append(sizes, line.Bytes)
 	}
 
 	if len(lines) != len(expected) {
@@ -87,12 +87,12 @@ func testMultilineOK(t *testing.T, cfg config.MultilineConfig, expected ...strin
 
 	for i, line := range lines {
 		expected := expected[i]
-		assert.Equal(t, line, expected[:len(expected)-1])
+		assert.Equal(t, line, expected)
 		assert.Equal(t, sizes[i], len(expected))
 	}
 }
 
-func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.MultilineConfig) lineReader {
+func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.MultilineConfig) LineProcessor {
 	encFactory, ok := encoding.FindEncoding("plain")
 	if !ok {
 		t.Fatalf("unable to find 'plain' encoding")
@@ -103,8 +103,13 @@ func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.Multil
 		t.Fatalf("failed to initialize encoding: %v", err)
 	}
 
-	reader, err := createLineReader(
-		bufferSource{in}, enc, 1024, defaultMaxBytes, logFileReaderConfig{}, &cfg)
+	var reader LineProcessor
+	reader, err = NewEncLineReader(in, enc, 4096)
+	if err != nil {
+		t.Fatalf("Failed to initialize line reader: %v", err)
+	}
+
+	reader, err = NewMultilineReader(reader, 1<<20, &cfg)
 	if err != nil {
 		t.Fatalf("failed to initializ reader: %v", err)
 	}
