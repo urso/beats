@@ -2,6 +2,7 @@ package harvester
 
 import (
 	"regexp"
+	"time"
 
 	"github.com/elastic/beats/libbeat/logp"
 )
@@ -38,17 +39,17 @@ func lineEndingChars(line []byte) int {
 // readLine reads a full line into buffer and returns it.
 // In case of partial lines, readLine does return and error and en empty string
 // This could potentialy be improved / replaced by https://github.com/elastic/beats/libbeat/tree/master/common/streambuf
-func readLine(reader lineReader) (string, int, error) {
+func readLine(reader lineReader) (time.Time, string, int, error) {
 	for {
-		line, size, err := reader.Next()
+		l, err := reader.Next()
 
 		// Full line read to be returned
-		if size != 0 && err == nil {
+		if l.sz != 0 && err == nil {
 			logp.Debug("harvester", "full line read")
-			return string(line), size, err
+			return l.ts, string(l.content), l.sz, err
 		}
 
-		return "", 0, err
+		return time.Time{}, "", 0, err
 	}
 }
 

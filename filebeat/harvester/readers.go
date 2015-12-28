@@ -7,12 +7,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/elastic/beats/filebeat/harvester/encoding"
 	"github.com/elastic/beats/filebeat/input"
 	"github.com/elastic/beats/libbeat/logp"
 )
 
+type line struct {
+	ts      time.Time
+	content []byte
+	sz      int
+}
+
 type lineReader interface {
-	Next() ([]byte, int, error)
+	Next() (line, error)
+}
+
+type encLineReader struct {
+	reader *encoding.LineReader
 }
 
 // noEOLLineReader strips last EOL from input line reader (if present).
@@ -45,8 +56,7 @@ type timeoutLineReader struct {
 }
 
 type lineMessage struct {
-	line []byte
-	sz   int
+	line line
 	err  error
 }
 
@@ -65,17 +75,33 @@ var (
 	errTimeout      = errors.New("timeout")
 )
 
+func newEncLineReader(
+	in io.Reader,
+	codec encoding.Encoding,
+	bufferSize int,
+) (encLineReader, error) {
+	r, err := encoding.NewLineReader(in, codec, bufferSize)
+	return encLineReader{r}, err
+}
+
+func (r encLineReader) Next() (line, error) {
+	c, sz, err := r.reader.Next()
+	return line{ts: time.Now(), content: c, sz: sz}, err
+}
+
 func newNoEOLLineReader(r lineReader) *noEOLLineReader {
 	return &noEOLLineReader{r}
 }
 
-func (n *noEOLLineReader) Next() ([]byte, int, error) {
-	line, size, err := n.reader.Next()
+func (n *noEOLLineReader) Next() (line, error) {
+	line, err := n.reader.Next()
 	if err != nil {
-		return line, size, err
+		return line, err
 	}
 
-	return line[:len(line)-lineEndingChars(line)], size, err
+	L := line.content
+	line.content = L[:len(L)-lineEndingChars(L)]
+	return line, err
 }
 
 func newLogFileReader(
@@ -212,12 +238,12 @@ func newBoundedLineReader(in lineReader, maxBytes int) *boundedLineReader {
 	return &boundedLineReader{reader: in, maxBytes: maxBytes}
 }
 
-func (r *boundedLineReader) Next() ([]byte, int, error) {
-	line, sz, err := r.reader.Next()
-	if len(line) > r.maxBytes {
-		line = line[:r.maxBytes]
+func (r *boundedLineReader) Next() (line, error) {
+	line, err := r.reader.Next()
+	if len(line.content) > r.maxBytes {
+		line.content = line.content[:r.maxBytes]
 	}
-	return line, sz, err
+	return line, err
 }
 
 func newTimeoutLineReader(in lineReader, signal error, timeout time.Duration) *timeoutLineReader {
@@ -233,13 +259,13 @@ func newTimeoutLineReader(in lineReader, signal error, timeout time.Duration) *t
 	}
 }
 
-func (tr *timeoutLineReader) Next() ([]byte, int, error) {
+func (tr *timeoutLineReader) Next() (line, error) {
 	if !tr.running {
 		tr.running = true
 		go func() {
 			for {
-				line, sz, err := tr.reader.Next()
-				tr.ch <- lineMessage{line, sz, err}
+				line, err := tr.reader.Next()
+				tr.ch <- lineMessage{line, err}
 				if err != nil {
 					break
 				}
@@ -252,8 +278,8 @@ func (tr *timeoutLineReader) Next() ([]byte, int, error) {
 		if msg.err != nil {
 			tr.running = false
 		}
-		return msg.line, msg.sz, msg.err
+		return msg.line, msg.err
 	case <-time.After(tr.timeout):
-		return nil, 0, tr.signal
+		return line{}, tr.signal
 	}
 }

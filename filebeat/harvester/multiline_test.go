@@ -72,13 +72,13 @@ func testMultilineOK(t *testing.T, cfg config.MultilineConfig, expected ...strin
 	var lines []string
 	var sizes []int
 	for {
-		line, sz, err := reader.Next()
+		line, err := reader.Next()
 		if err != nil {
 			break
 		}
 
-		lines = append(lines, string(line))
-		sizes = append(sizes, sz)
+		lines = append(lines, string(line.content))
+		sizes = append(sizes, line.sz)
 	}
 
 	if len(lines) != len(expected) {

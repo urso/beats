@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/elastic/beats/filebeat/config"
 	"github.com/elastic/beats/filebeat/harvester/encoding"
@@ -66,7 +65,7 @@ func createLineReader(
 		return nil, err
 	}
 
-	reader, err = encoding.NewLineReader(fileReader, codec, bufferSize)
+	reader, err = newEncLineReader(fileReader, codec, bufferSize)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +136,7 @@ func (h *Harvester) Harvest() {
 
 	for {
 		// Partial lines return error and are only read on completion
-		text, bytesRead, err := readLine(reader)
+		ts, text, bytesRead, err := readLine(reader)
 		if err != nil {
 			if err == errFileTruncate {
 				seeker, ok := h.file.(io.Seeker)
@@ -160,7 +159,7 @@ func (h *Harvester) Harvest() {
 		if h.shouldExportLine(text) {
 			// Sends text to spooler
 			event := &input.FileEvent{
-				ReadTime:     time.Now(),
+				ReadTime:     ts,
 				Source:       &h.Path,
 				InputType:    h.Config.InputType,
 				DocumentType: h.Config.DocumentType,

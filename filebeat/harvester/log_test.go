@@ -65,21 +65,21 @@ func TestReadLine(t *testing.T) {
 	reader, _ := createLineReader(fileSource{readFile}, codec, 100, 1000, readConfig, nil)
 
 	// Read third line
-	text, bytesread, err := readLine(reader)
+	_, text, bytesread, err := readLine(reader)
 	fmt.Printf("received line: '%s'\n", text)
 	assert.Nil(t, err)
 	assert.Equal(t, text, firstLineString[0:len(firstLineString)-1])
 	assert.Equal(t, bytesread, len(firstLineString))
 
 	// read second line
-	text, bytesread, err = readLine(reader)
+	_, text, bytesread, err = readLine(reader)
 	fmt.Printf("received line: '%s'\n", text)
 	assert.Equal(t, text, secondLineString[0:len(secondLineString)-1])
 	assert.Equal(t, bytesread, len(secondLineString))
 	assert.Nil(t, err)
 
 	// Read third line, which doesn't exist
-	text, bytesread, err = readLine(reader)
+	_, text, bytesread, err = readLine(reader)
 	fmt.Printf("received line: '%s'\n", text)
 	assert.Equal(t, "", text)
 	assert.Equal(t, bytesread, 0)
