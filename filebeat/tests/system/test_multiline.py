@@ -38,3 +38,32 @@ class Test(TestCase):
 
         # Check that output file has the same number of lines as the log file
         assert 20 == len(output)
+
+    def test_c_style_log(self):
+        """
+        Test that multi lines for c style log works
+        It checks that all lines following a line with \\ are appended to the previous line
+        """
+        self.render_config_template(
+            path=os.path.abspath(self.working_dir) + "/log/*",
+            multiline=True,
+            pattern="\\\\$",
+            match="after"
+        )
+
+        os.mkdir(self.working_dir + "/log/")
+        shutil.copy2("../files/logs/multiline-c-log.log", os.path.abspath(self.working_dir) + "/log/multiline-c-log.log")
+
+        proc = self.start_filebeat()
+
+        # wait for the "Skipping file" log message
+        self.wait_until(
+            lambda: self.output_has(lines=4),
+            max_timeout=10)
+
+        proc.kill_and_wait()
+
+        output = self.read_output()
+
+        # Check that output file has the same number of lines as the log file
+        assert 4 == len(output)
