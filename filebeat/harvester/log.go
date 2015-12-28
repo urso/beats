@@ -146,7 +146,7 @@ func (h *Harvester) Harvest() {
 					return
 				}
 
-				logp.Debug("harvester", "File was truncated. Begin reading file from offset 0: %s", h.Path)
+				logp.Info("File was truncated. Begin reading file from offset 0: %s", h.Path)
 
 				h.Offset = 0
 				seeker.Seek(h.Offset, os.SEEK_SET)
