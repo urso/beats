@@ -106,8 +106,47 @@ class Test(TestCase):
 
     def test_timeout(self):
         """
-        Test that data is written after timeout
+        Test that data is sent after timeout
         """
+        self.render_config_template(
+            path=os.path.abspath(self.working_dir) + "/log/*",
+            multiline=True,
+            pattern="^\[",
+            negate="true",
+            match="after",
+        )
+
+        os.mkdir(self.working_dir + "/log/")
+
+        testfile = self.working_dir + "/log/test.log"
+        file = open(testfile, 'w', 0)
+
+        file.write("[2015] hello world")
+        file.write("\n")
+        file.write("  First Line\n")
+        file.write("  Second Line\n")
+
+        proc = self.start_filebeat()
+
+        self.wait_until(
+            lambda: self.output_has(lines=1),
+            max_timeout=10)
+
+        # Because of the timeout the following two lines should be put together
+        file.write("  This should not be third\n")
+        file.write("  This should not be fourth\n")
+        # This starts a new pattern
+        file.write("[2016] Hello world\n")
+        # This line should be appended
+        file.write("  First line again\n")
+
+        self.wait_until(
+            lambda: self.output_has(lines=3),
+            max_timeout=10)
+        proc.kill_and_wait()
+
+        output = self.read_output()
+        assert 3 == len(output)
 
     def test_max_bytes(self):
         """
