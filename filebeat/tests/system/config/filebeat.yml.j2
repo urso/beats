@@ -38,6 +38,8 @@ filebeat:
       exclude_files: {{exclude_files}}
       {% endif %}
 
+      max_bytes: {{ max_bytes|default(10485760) }}
+
       {% if multiline %}
       multiline:
         pattern: {{pattern}}

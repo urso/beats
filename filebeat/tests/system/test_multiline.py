@@ -87,7 +87,6 @@ class Test(TestCase):
 
         proc = self.start_filebeat()
 
-        # wait for the "Skipping file" log message
         self.wait_until(
             lambda: self.output_has(lines=20),
             max_timeout=10)
@@ -114,3 +113,33 @@ class Test(TestCase):
         """
         Test the maximum number of bytes that is sent
         """
+        self.render_config_template(
+            path=os.path.abspath(self.working_dir) + "/log/*",
+            multiline=True,
+            pattern="^\[",
+            negate="true",
+            match="after",
+            max_bytes=60
+        )
+
+        os.mkdir(self.working_dir + "/log/")
+        shutil.copy2("../files/logs/elasticsearch-multiline-log.log", os.path.abspath(self.working_dir) + "/log/elasticsearch-multiline-log.log")
+
+        proc = self.start_filebeat()
+
+        self.wait_until(
+            lambda: self.output_has(lines=20),
+            max_timeout=10)
+
+        proc.kill_and_wait()
+
+        output = self.read_output()
+
+        # Check that first 60 chars are sent
+        assert True == self.log_contains("cluster.metadata", "output/filebeat")
+
+        # Checks that chars aferwards are not sent
+        assert False == self.log_contains("Zach", "output/filebeat")
+
+        # Check that output file has the same number of lines as the log file
+        assert 20 == len(output)
