@@ -26,7 +26,8 @@ type MultiLine struct {
 }
 
 const (
-	defaultMaxLines = 500
+	defaultMaxLines         = 500
+	defaultMultilineTimeout = 5 * time.Second
 )
 
 type matcher func(last, current []byte) bool
@@ -65,14 +66,18 @@ func NewMultiline(
 		maxLines = *config.MaxLines
 	}
 
+	timeout := defaultMultilineTimeout
 	if config.Timeout != "" {
-		timeout, err := time.ParseDuration(config.Timeout)
+		timeout, err = time.ParseDuration(config.Timeout)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration '%s': %v", config.Timeout, err)
 		}
 		if timeout < 0 {
 			return nil, fmt.Errorf("timeout %v must not be negative", config.Timeout)
 		}
+	}
+
+	if timeout > 0 {
 		r = newTimeoutProcessor(r, errMultilineTimeout, timeout)
 	}
 
