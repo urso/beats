@@ -25,7 +25,6 @@ type multiLineReader struct {
 }
 
 const (
-	defaultMaxBytes = 10 * (1 << 20) // 10MB
 	defaultMaxLines = 500
 )
 
@@ -37,6 +36,7 @@ var (
 
 func newMultilineReader(
 	r lineReader,
+	maxBytes int,
 	config *config.MultilineConfig,
 ) (*multiLineReader, error) {
 	type matcherFactory func(pattern string) (matcher, error)
@@ -57,11 +57,6 @@ func newMultilineReader(
 
 	if config.Negate {
 		matcher = negatedMatcher(matcher)
-	}
-
-	maxBytes := defaultMaxBytes
-	if config.MaxBytes != nil {
-		maxBytes = *config.MaxBytes
 	}
 
 	maxLines := defaultMaxLines

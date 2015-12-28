@@ -70,6 +70,7 @@ type HarvesterConfig struct {
 	ForceCloseFiles    bool             `yaml:"force_close_files"`
 	ExcludeLines       []string         `yaml:"exclude_lines"`
 	IncludeLines       []string         `yaml:"include_lines"`
+	MaxBytes           *int             `yaml:"max_bytes"`
 	Multiline          *MultilineConfig `yaml:"multiline"`
 }
 
@@ -78,7 +79,6 @@ type MultilineConfig struct {
 	Negate   bool   `yaml:"negate"`
 	Match    string `yaml:"match"`
 	MaxLines *int   `yaml:"max_lines"`
-	MaxBytes *int   `yaml:"max_bytes"`
 	Timeout  string `yaml:"timeout"`
 }
 

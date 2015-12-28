@@ -14,6 +14,10 @@ import (
 	"golang.org/x/text/transform"
 )
 
+const (
+	defaultMaxBytes = 10 * (1 << 20) // 10MB
+)
+
 func NewHarvester(
 	prospectorCfg config.ProspectorConfig,
 	cfg *config.HarvesterConfig,
@@ -50,6 +54,7 @@ func createLineReader(
 	in FileSource,
 	codec encoding.Encoding,
 	bufferSize int,
+	maxBytes int,
 	readerConfig logFileReaderConfig,
 	mlrConfig *config.MultilineConfig,
 ) (lineReader, error) {
@@ -67,13 +72,15 @@ func createLineReader(
 	}
 
 	if mlrConfig != nil {
-		reader, err = newMultilineReader(reader, mlrConfig)
+		reader, err = newMultilineReader(reader, maxBytes, mlrConfig)
 		if err != nil {
 			return nil, err
 		}
+
+		return newNoEOLLineReader(reader), nil
 	}
 
-	return newNoEOLLineReader(reader), nil
+	return newBoundedLineReader(newNoEOLLineReader(reader), maxBytes), nil
 }
 
 // Log harvester reads files line by line and sends events to the defined output
@@ -115,7 +122,14 @@ func (h *Harvester) Harvest() {
 		maxBackoffDuration: config.MaxBackoffDuration,
 		backoffFactor:      config.BackoffFactor,
 	}
-	reader, err := createLineReader(h.file, enc, config.BufferSize, readerConfig, config.Multiline)
+
+	maxBytes := defaultMaxBytes
+	if config.MaxBytes != nil {
+		maxBytes = *config.MaxBytes
+	}
+
+	reader, err := createLineReader(
+		h.file, enc, config.BufferSize, maxBytes, readerConfig, config.Multiline)
 	if err != nil {
 		logp.Err("Stop Harvesting. Unexpected encoding line reader error: %s", err)
 		return

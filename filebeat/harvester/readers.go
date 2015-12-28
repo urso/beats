@@ -30,6 +30,11 @@ type logFileReader struct {
 	backoff      time.Duration
 }
 
+type boundedLineReader struct {
+	reader   lineReader
+	maxBytes int
+}
+
 type timeoutLineReader struct {
 	reader  lineReader
 	timeout time.Duration
@@ -201,6 +206,18 @@ func (r *logFileReader) wait() {
 			r.backoff = r.config.maxBackoffDuration
 		}
 	}
+}
+
+func newBoundedLineReader(in lineReader, maxBytes int) *boundedLineReader {
+	return &boundedLineReader{reader: in, maxBytes: maxBytes}
+}
+
+func (r *boundedLineReader) Next() ([]byte, int, error) {
+	line, sz, err := r.reader.Next()
+	if len(line) > r.maxBytes {
+		line = line[:r.maxBytes]
+	}
+	return line, sz, err
 }
 
 func newTimeoutLineReader(in lineReader, signal error, timeout time.Duration) *timeoutLineReader {

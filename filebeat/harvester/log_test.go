@@ -62,7 +62,7 @@ func TestReadLine(t *testing.T) {
 		maxBackoffDuration: 1 * time.Second,
 		backoffFactor:      2,
 	}
-	reader, _ := createLineReader(fileSource{readFile}, codec, 100, readConfig, nil)
+	reader, _ := createLineReader(fileSource{readFile}, codec, 100, 1000, readConfig, nil)
 
 	// Read third line
 	text, bytesread, err := readLine(reader)

@@ -103,7 +103,8 @@ func createMultilineTestReader(t *testing.T, in *bytes.Buffer, cfg config.Multil
 		t.Fatalf("failed to initialize encoding: %v", err)
 	}
 
-	reader, err := createLineReader(bufferSource{in}, enc, 1024, logFileReaderConfig{}, &cfg)
+	reader, err := createLineReader(
+		bufferSource{in}, enc, 1024, defaultMaxBytes, logFileReaderConfig{}, &cfg)
 	if err != nil {
 		t.Fatalf("failed to initializ reader: %v", err)
 	}
