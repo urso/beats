@@ -44,6 +44,7 @@ filebeat:
         negate: {{negate}}
         match: {{match}}
         timeout: 1s
+        max_lines: {{ max_lines|default(500) }}
       {% endif %}
 
   spool_size:

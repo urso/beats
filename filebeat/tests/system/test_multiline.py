@@ -67,3 +67,50 @@ class Test(TestCase):
 
         # Check that output file has the same number of lines as the log file
         assert 4 == len(output)
+
+    def test_max_lines(self):
+        """
+        Test the maximum number of lines that is sent by multiline
+        All further lines are discarded
+        """
+        self.render_config_template(
+            path=os.path.abspath(self.working_dir) + "/log/*",
+            multiline=True,
+            pattern="^\[",
+            negate="true",
+            match="after",
+            max_lines=3
+        )
+
+        os.mkdir(self.working_dir + "/log/")
+        shutil.copy2("../files/logs/elasticsearch-multiline-log.log", os.path.abspath(self.working_dir) + "/log/elasticsearch-multiline-log.log")
+
+        proc = self.start_filebeat()
+
+        # wait for the "Skipping file" log message
+        self.wait_until(
+            lambda: self.output_has(lines=20),
+            max_timeout=10)
+
+        proc.kill_and_wait()
+
+        output = self.read_output()
+
+        # Checks line 3 is sent
+        assert True == self.log_contains("MetaDataMappingService.java:388", "output/filebeat")
+
+        # Checks line 4 is not sent anymore
+        assert False == self.log_contains("InternalClusterService.java:388", "output/filebeat")
+
+        # Check that output file has the same number of lines as the log file
+        assert 20 == len(output)
+
+    def test_timeout(self):
+        """
+        Test that data is written after timeout
+        """
+
+    def test_max_bytes(self):
+        """
+        Test the maximum number of bytes that is sent
+        """
