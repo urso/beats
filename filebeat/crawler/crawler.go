@@ -73,7 +73,12 @@ func (c *Crawler) Start(
 
 	// Prospect the globs/paths given on the command line and launch harvesters
 	for _, inputConfig := range c.inputConfigs {
-		err := c.startInput(pipeline, inputConfig, r.GetStates())
+		states, err := r.GetStates()
+		if err != nil {
+			return fmt.Errorf("failed to read registrar states: %+v", err)
+		}
+
+		err = c.startInput(pipeline, inputConfig, states)
 		if err != nil {
 			return err
 		}

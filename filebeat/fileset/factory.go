@@ -18,6 +18,8 @@
 package fileset
 
 import (
+	"fmt"
+
 	"github.com/gofrs/uuid"
 
 	"github.com/elastic/beats/filebeat/channel"
@@ -100,7 +102,12 @@ func (f *Factory) Create(p beat.Pipeline, c *common.Config, meta *common.MapStrP
 	inputs := make([]*input.Runner, len(pConfigs))
 	connector := channel.ConnectTo(p, f.outlet)
 	for i, pConfig := range pConfigs {
-		inputs[i], err = input.New(pConfig, connector, f.beatDone, f.registrar.GetStates(), meta)
+		states, err := f.registrar.GetStates()
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read registrar state: %+v", err)
+		}
+
+		inputs[i], err = input.New(pConfig, connector, f.beatDone, states, meta)
 		if err != nil {
 			logp.Err("Error creating input: %s", err)
 			return nil, err

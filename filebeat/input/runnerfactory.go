@@ -18,6 +18,8 @@
 package input
 
 import (
+	"fmt"
+
 	"github.com/elastic/beats/filebeat/channel"
 	"github.com/elastic/beats/filebeat/registrar"
 	"github.com/elastic/beats/libbeat/beat"
@@ -48,7 +50,11 @@ func (r *RunnerFactory) Create(
 	meta *common.MapStrPointer,
 ) (cfgfile.Runner, error) {
 	connector := channel.ConnectTo(pipeline, r.outlet)
-	p, err := New(c, connector, r.beatDone, r.registrar.GetStates(), meta)
+	states, err := r.registrar.GetStates()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read registrar states: %+v", err)
+	}
+	p, err := New(c, connector, r.beatDone, states, meta)
 	if err != nil {
 		// In case of error with loading state, input is still returned
 		return p, err

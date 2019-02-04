@@ -17,27 +17,11 @@
 
 package registrar
 
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
-
-	"github.com/elastic/beats/filebeat/config"
-	"github.com/elastic/beats/filebeat/input/file"
-	helper "github.com/elastic/beats/libbeat/common/file"
-	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/libbeat/monitoring"
-	"github.com/elastic/beats/libbeat/paths"
-)
-
+/*
 type Registrar struct {
-	Channel      chan []file.State
-	out          successLogger
-	done         chan struct{}
+	Channel chan []file.State
+	out     successLogger
+	done    chan struct{}
 	registryFile string      // Path to the Registry File
 	fileMode     os.FileMode // Permissions to apply on the Registry File
 	wg           sync.WaitGroup
@@ -434,3 +418,4 @@ func writeTmpFile(baseName string, perm os.FileMode, states []file.State) (strin
 
 	return tempfile, nil
 }
+*/
