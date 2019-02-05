@@ -54,7 +54,12 @@ type successLogger interface {
 }
 
 var (
-	statesCleanup = monitoring.NewInt(nil, "registrar.states.cleanup")
+	statesUpdate    = monitoring.NewInt(nil, "registrar.states.update")
+	statesCleanup   = monitoring.NewInt(nil, "registrar.states.cleanup")
+	statesCurrent   = monitoring.NewInt(nil, "registrar.states.current")
+	registryWrites  = monitoring.NewInt(nil, "registrar.writes.total")
+	registryFails   = monitoring.NewInt(nil, "registrar.writes.fail")
+	registrySuccess = monitoring.NewInt(nil, "registrar.writes.success")
 )
 
 func New(cfg config.Registry, out successLogger) (*Registrar, error) {
@@ -157,6 +162,14 @@ func (r *Registrar) Run() {
 		flushC <-chan time.Time
 	)
 
+	r.store.View(func(tx *kvstore.Tx) error {
+		count, err := tx.Count()
+		if err != nil {
+			statesCurrent.Set(int64(count))
+		}
+		return nil
+	})
+
 	for {
 		select {
 		case <-r.done:
@@ -214,6 +227,7 @@ func (r *Registrar) processStates(states []file.State) {
 	for _, st := range states {
 		st.Timestamp = ts
 		r.pending[st.ID()] = st
+		statesUpdate.Add(1)
 	}
 }
 
@@ -229,10 +243,12 @@ func (r *Registrar) flushRegistry() {
 }
 
 func (r *Registrar) writeRegistry() error {
+	registryWrites.Inc()
+
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	return r.store.Update(func(tx *kvstore.Tx) error {
+	err := r.store.Update(func(tx *kvstore.Tx) error {
 		// First clean up states
 		if err := r.gcStates(tx); err != nil {
 			return err
@@ -246,6 +262,14 @@ func (r *Registrar) writeRegistry() error {
 
 		return nil
 	})
+
+	if err != nil {
+		registryFails.Inc()
+	} else {
+		registrySuccess.Inc()
+	}
+
+	return err
 }
 
 // gcStates runs a registry Cleanup. The method check if more event in the
@@ -322,5 +346,6 @@ func (r *Registrar) gcStates(tx *kvstore.Tx) error {
 
 	r.gcRequired = false
 	r.gcEnabled = pendingClean > 0
+	statesCurrent.Set(int64(numAfter))
 	return nil
 }
