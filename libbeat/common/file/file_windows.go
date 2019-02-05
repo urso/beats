@@ -26,9 +26,9 @@ import (
 )
 
 type StateOS struct {
-	IdxHi uint64 `json:"idxhi,"`
-	IdxLo uint64 `json:"idxlo,"`
-	Vol   uint64 `json:"vol,"`
+	IdxHi uint64 `json:"idxhi," struct:"idxhi"`
+	IdxLo uint64 `json:"idxlo," struct:"idxlo"`
+	Vol   uint64 `json:"vol," struct:"vol"`
 }
 
 // GetOSState returns the platform specific StateOS
