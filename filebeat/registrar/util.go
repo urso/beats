@@ -23,15 +23,6 @@ import (
 
 type stateTable map[string]file.State
 
-type stateSet map[string]struct{}
-
-func (s stateSet) Insert(k string) { s[k] = struct{}{} }
-func (s stateSet) Remove(k string) { delete(s, k) }
-func (s stateSet) Has(k string) bool {
-	_, exists := s[k]
-	return exists
-}
-
 func (t stateTable) Has(k string) bool {
 	_, exists := t[k]
 	return exists

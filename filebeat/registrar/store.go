@@ -18,6 +18,7 @@
 package registrar
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type Registrar struct {
 	gcEnabled  bool // gcEnabled indicates the registry contains some state that can be gc'ed in the future
 
 	mux            sync.RWMutex
+	managed        map[string]activityState // per file activity state not to be stored on disk
 	pendingUpdates int
 	pending        stateTable
 	flushTimeout   time.Duration
@@ -52,6 +54,13 @@ type Registrar struct {
 
 type successLogger interface {
 	Published(n int) bool
+}
+
+type activityState struct {
+	Finished  bool
+	FileInfo  os.FileInfo
+	Timestamp time.Time
+	TTL       time.Duration
 }
 
 var (
@@ -109,6 +118,35 @@ func New(cfg config.Registry, out successLogger) (*Registrar, error) {
 }
 
 func (r *Registrar) Init() error {
+	managed := map[string]activityState{}
+	err := r.store.View(func(tx *kvstore.Tx) error {
+		return tx.Each(func(k kvstore.Key, vs kvstore.ValueDecoder) (bool, error) {
+			/*
+				state := struct {
+					Timestamp time.Time `struct:"-"`
+				}{}
+				if err := vs.Decode(&state); err != nil {
+					return false, fmt.Errorf("Failed to parse state (key=%v): %+v", k.String(), err)
+				}
+			*/
+
+			state := struct {
+				Timestamp time.Time `struct:"-"`
+			}{}
+
+			managed[k.String()] = activityState{
+				Finished:  true,
+				Timestamp: state.Timestamp,
+				TTL:       -2,
+			}
+			return true, nil
+		})
+	})
+	if err != nil {
+		return err
+	}
+
+	r.managed = managed
 	return nil
 }
 
@@ -125,12 +163,28 @@ func (r *Registrar) GetStates() ([]file.State, error) {
 			} else {
 				var state file.State
 				if err := vd.Decode(&state); err == nil {
+					activity, exist := r.managed[k.String()]
+					if !exist {
+						activity.Finished = true
+						activity.TTL = -2
+					}
+
+					state.Finished = activity.Finished
+					state.Fileinfo = activity.FileInfo
+					state.Timestamp = activity.Timestamp
+					state.TTL = activity.TTL
 					states = append(states, state)
+				} else {
+					logp.Debug("registrar", "failed to decode state: %+v", err)
 				}
 			}
 			return true, nil
 		})
 	})
+
+	for _, state := range states {
+		logp.Debug("registrar", "state read: %v", state)
+	}
 
 	return states, err
 }
@@ -227,7 +281,16 @@ func (r *Registrar) processStates(states []file.State) {
 	ts := time.Now()
 	for _, st := range states {
 		st.Timestamp = ts
-		r.pending[st.ID()] = st
+
+		k := st.ID()
+		r.pending[k] = st
+		r.managed[k] = activityState{
+			Finished:  st.Finished,
+			FileInfo:  st.Fileinfo,
+			Timestamp: st.Timestamp,
+			TTL:       st.TTL,
+		}
+
 		statesUpdate.Add(1)
 	}
 }
@@ -290,46 +353,27 @@ func (r *Registrar) gcStates(tx *kvstore.Tx) error {
 	}
 
 	// list of entries to be removed
-	var remove []kvstore.Key
 	pendingClean := 0
-	err = tx.Each(func(k kvstore.Key, vs kvstore.ValueDecoder) (bool, error) {
-		if r.pending.Has(k.String()) {
-			return true, nil
+	for k, st := range r.managed {
+		if r.pending.Has(k) {
+			continue
 		}
 
-		value := struct {
-			Finished  bool
-			Timestamp time.Time     `json:"timestamp"`
-			TTL       time.Duration `json:"ttl"`
-		}{}
-		if err := vs.Decode(&value); err != nil {
-			logp.Err("Failed to decode registry entry '%s', removing.", k)
-			remove = append(remove, k)
-		}
-
-		canExpire := value.TTL > 0
-		expired := value.TTL == 0 || (canExpire && (now.Sub(value.Timestamp) > value.TTL))
-		if expired && !value.Finished {
+		canExpire := st.TTL > 0
+		expired := st.TTL == 0 || (canExpire && (now.Sub(st.Timestamp) > st.TTL))
+		if expired && !st.Finished {
 			logp.Err("State for %s should have been dropped, but couldn't as state is not finished.", k)
 			expired = false
 		}
 
 		if expired {
-			remove = append(remove, k)
-			logp.Debug("state", "State removed for '%s' because of older: %v", k, value.TTL)
-		} else if canExpire || value.TTL == 0 {
+			if err := tx.Remove(kvstore.Key(k)); err != nil {
+				return err
+			}
+			delete(r.managed, k)
+			logp.Debug("state", "State removed for '%s' because of older: %v", k, st.TTL)
+		} else if canExpire || st.TTL == 0 {
 			pendingClean++
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, k := range remove {
-		if err := tx.Remove(k); err != nil {
-			return err
 		}
 	}
 
