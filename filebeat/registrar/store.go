@@ -27,6 +27,7 @@ import (
 	"github.com/elastic/beats/libbeat/kvstore/backend/memlog"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/monitoring"
+	"github.com/elastic/beats/libbeat/paths"
 )
 
 type Registrar struct {
@@ -63,8 +64,8 @@ var (
 )
 
 func New(cfg config.Registry, out successLogger) (*Registrar, error) {
+	home := paths.Resolve(paths.Data, cfg.Path)
 	/*
-		home := paths.Resolve(paths.Data, cfg.Path)
 		migrateFile := cfg.MigrateFile
 		if migrateFile != "" {
 			migrateFile = paths.Resolve(paths.Data, migrateFile)
@@ -77,7 +78,7 @@ func New(cfg config.Registry, out successLogger) (*Registrar, error) {
 	*/
 
 	regBackend, err := memlog.New(memlog.Settings{
-		Root:       cfg.Path,
+		Root:       home,
 		FileMode:   cfg.Permissions,
 		Checkpoint: nil,
 	})
