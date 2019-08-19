@@ -17,7 +17,10 @@
 
 package memlog
 
-import "github.com/elastic/beats/libbeat/common"
+import (
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/transform/typeconv"
+)
 
 type txState struct {
 	bins map[uint64]txCacheLine
@@ -151,14 +154,13 @@ func (e *txCacheEntry) Decode(to interface{}) (err error) {
 		return errValueRemoved
 	}
 
-	tc := e.tx.getTypeConv()
 	if e.value != nil {
-		if err := tc.Convert(to, e.value); err != nil {
+		if err := typeconv.Convert(to, e.value); err != nil {
 			return err
 		}
 	}
 	if e.updates != nil {
-		if err := tc.Convert(to, e.updates); err != nil {
+		if err := typeconv.Convert(to, e.updates); err != nil {
 			return err
 		}
 	}

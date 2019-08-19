@@ -26,8 +26,6 @@ type transaction struct {
 	state txState
 	mem   memTx
 
-	typeConv *typeConv
-
 	active   bool
 	readonly bool
 }
@@ -49,11 +47,6 @@ func (tx *transaction) close() {
 		lock := chooseTxLock(&tx.store.lock, tx.readonly)
 		lock.Unlock()
 		tx.active = false
-
-		if tx.typeConv != nil {
-			tx.typeConv.release()
-			tx.typeConv = nil
-		}
 	}
 }
 
@@ -406,13 +399,4 @@ func (tx *transaction) checkWrite() error {
 
 func (tx *transaction) checkRead() error {
 	return tx.checkActive()
-}
-
-func (tx *transaction) getTypeConv() *typeConv {
-	tc := tx.typeConv
-	if tc == nil {
-		tc = newTypeConv()
-		tx.typeConv = tc
-	}
-	return tc
 }

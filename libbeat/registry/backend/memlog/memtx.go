@@ -17,7 +17,10 @@
 
 package memlog
 
-import "github.com/elastic/beats/libbeat/common"
+import (
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/transform/typeconv"
+)
 
 type memTx struct {
 	parent memTxParent
@@ -31,7 +34,6 @@ type memTxParent interface {
 	IsReadonly() bool
 	checkRead() error
 	checkWrite() error
-	getTypeConv() *typeConv
 }
 
 func (tx *memTx) init(parent memTxParent, store *memStore, state *txState) {
@@ -248,6 +250,5 @@ func (tx *memTx) hash(k []byte) uint64 { return tx.hashFn(k) }
 
 func (tx *memTx) decodeOpValue(in interface{}) (common.MapStr, error) {
 	var opVal map[string]interface{}
-	tc := tx.parent.getTypeConv()
-	return common.MapStr(opVal), tc.Convert(&opVal, in)
+	return common.MapStr(opVal), typeconv.Convert(&opVal, in)
 }

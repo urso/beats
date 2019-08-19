@@ -50,7 +50,6 @@ type diskStore struct {
 }
 
 type diskLoader struct {
-	typeConv *typeConv
 }
 
 type logAction struct {
@@ -416,15 +415,12 @@ func (s *diskStore) commitOps(st *txState) error {
 }
 
 func newDiskLoader() *diskLoader {
-	return &diskLoader{
-		typeConv: newTypeConv(),
-	}
+	return &diskLoader{}
 }
 
-func (l *diskLoader) IsReadonly() bool       { return false }
-func (l *diskLoader) checkRead() error       { return nil }
-func (l *diskLoader) checkWrite() error      { return nil }
-func (l *diskLoader) getTypeConv() *typeConv { return l.typeConv }
+func (l *diskLoader) IsReadonly() bool  { return false }
+func (l *diskLoader) checkRead() error  { return nil }
+func (l *diskLoader) checkWrite() error { return nil }
 
 // loadDataFile create a new hashtable with all key/value pairs found.
 func loadDataFile(path string) (hashtable, error) {
