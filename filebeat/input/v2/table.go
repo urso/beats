@@ -18,33 +18,21 @@
 package v2
 
 import (
-	"github.com/elastic/beats/libbeat/beat"
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/libbeat/monitoring"
+	"bytes"
+	"hash/fnv"
 )
 
-type Input struct {
-	Name   string
-	Create func(ctx Context, config *common.Config) (Instance, error)
+type resourceTable struct {
 }
 
-type Context struct {
-	Monitors Monitors
-	Pipeline beat.Pipeline
-	// Coordinator *Coordinator
+type ResourceKey []byte
+
+func (r ResourceKey) Hash() uint64 {
+	h := fnv.New64()
+	h.Write(r)
+	return h.Sum64()
 }
 
-type Monitors struct {
-	Log       *logp.Logger
-	Metrics   *monitoring.Registry
-	Telemetry *monitoring.Registry
-}
-
-type Instance interface {
-	Run(ctx Context)
-}
-
-type optInstanceStopper interface {
-	Stop()
+func (r ResourceKey) Equal(other ResourceKey) bool {
+	return bytes.Equal(r, other)
 }
