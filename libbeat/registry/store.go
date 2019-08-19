@@ -124,6 +124,11 @@ func (s *Store) View(fn func(tx *Tx) error) error {
 	return fn(tx)
 }
 
+// Name returns the stores name.
+func (s *Store) Name() string {
+	return s.shared.name
+}
+
 func (s *Store) finishTx(tx *Tx) {
 	s.activeTx.Done()
 }
