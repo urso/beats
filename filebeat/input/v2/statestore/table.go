@@ -24,24 +24,24 @@ import (
 	"github.com/elastic/go-concert/atomic"
 )
 
-type table map[ResourceKey]*resource
+type table map[ResourceKey]*resourceEntry
 
-type resource struct {
+type resourceEntry struct {
 	key  ResourceKey
 	lock chan struct{}
 
 	refCount atomic.Uint
 
-	valueMu sync.Mutex
-	value   common.MapStr
+	valueMux sync.Mutex
+	value    common.MapStr
 }
 
-func (t table) GetOrCreate(k ResourceKey) *resource {
+func (t table) GetOrCreate(k ResourceKey) *resourceEntry {
 	r := t.Find(k)
 	if r == nil {
 		lock := make(chan struct{}, 1)
 		lock <- struct{}{}
-		r = &resource{
+		r = &resourceEntry{
 			key:      k,
 			lock:     lock,
 			refCount: atomic.MakeUint(1),
@@ -54,7 +54,7 @@ func (t table) GetOrCreate(k ResourceKey) *resource {
 	return r
 }
 
-func (t table) Find(k ResourceKey) *resource {
+func (t table) Find(k ResourceKey) *resourceEntry {
 	res := t[k]
 	if res != nil {
 		res.refCount.Inc()
@@ -66,19 +66,19 @@ func (t table) Remove(k ResourceKey) {
 	delete(t, k)
 }
 
-func (r *resource) Retain() {
+func (r *resourceEntry) Retain() {
 	r.refCount.Inc()
 }
 
-func (r *resource) Release() bool {
+func (r *resourceEntry) Release() bool {
 	return r.refCount.Dec() == 0
 }
 
-func (r *resource) Lock() {
+func (r *resourceEntry) Lock() {
 	<-r.lock
 }
 
-func (r *resource) TryLock() bool {
+func (r *resourceEntry) TryLock() bool {
 	select {
 	case <-r.lock:
 		return true
@@ -87,6 +87,6 @@ func (r *resource) TryLock() bool {
 	}
 }
 
-func (r *resource) Unlock() {
+func (r *resourceEntry) Unlock() {
 	r.lock <- struct{}{}
 }

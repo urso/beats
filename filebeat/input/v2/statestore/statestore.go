@@ -41,31 +41,21 @@ type Resource struct {
 	store    *Store
 	isLocked bool
 
-	key      ResourceKey
-	resource *resource
+	key   ResourceKey
+	entry *resourceEntry
 }
 
 type RegistryResource Resource
 
 type ResourceUpdateOp struct {
 	store    *Store
-	resource *resource
+	resource *resourceEntry
 	key      registry.Key
 	val      interface{}
 }
 
 func (s *Store) Access(key ResourceKey) *Resource {
-	res := &Resource{
-		store:    s,
-		isLocked: false,
-		key:      key,
-	}
-
-	// in case we miss an unlock operation (programmer error or panic that hash
-	// been caught) we set a finalizer to eventually free the resource.
-	// The Unlock operation will unsert the finalizer.
-	runtime.SetFinalizer(res, (*Resource).finalize)
-	return res
+	return newResource(s, key)
 }
 
 // Lock locks and returns the resource for a given key.
@@ -86,6 +76,20 @@ func (s *Store) TryLock(key ResourceKey) *Resource {
 	return res
 }
 
+func newResource(store *Store, key ResourceKey) *Resource {
+	res := &Resource{
+		store:    store,
+		isLocked: false,
+		key:      key,
+	}
+
+	// in case we miss an unlock operation (programmer error or panic that hash
+	// been caught) we set a finalizer to eventually free the resource.
+	// The Unlock operation will unsert the finalizer.
+	runtime.SetFinalizer(res, (*Resource).finalize)
+	return res
+}
+
 func (r *Resource) Lock() {
 	if r.isLocked {
 		panic(errors.New("trying to lock already locked resource"))
@@ -98,7 +102,7 @@ func (r *Resource) Lock() {
 
 	entry.Lock()
 	r.isLocked = true
-	r.resource = entry
+	r.entry = entry
 }
 
 func (r *Resource) TryLock() bool {
@@ -118,7 +122,7 @@ func (r *Resource) TryLock() bool {
 			store.resources.Remove(r.key)
 		}
 	} else {
-		r.resource = entry
+		r.entry = entry
 	}
 	return r.isLocked
 }
@@ -145,9 +149,9 @@ func (r *Resource) finalize() {
 	store.resourcesMux.Lock()
 	defer store.resourcesMux.Unlock()
 
-	entry := r.resource
+	entry := r.entry
 	entry.Unlock()
-	r.resource = nil
+	r.entry = nil
 
 	if entry.Release() {
 		store.resources.Remove(r.key)
@@ -158,31 +162,31 @@ func (r *Resource) Unmarshal(to interface{}) error {
 	checkLocked(r.isLocked)
 
 	err := func() error {
-		r.resource.valueMu.Lock()
-		defer r.resource.valueMu.Unlock()
+		r.entry.valueMux.Lock()
+		defer r.entry.valueMux.Unlock()
 		return r.initValue()
 	}()
 	if err != nil {
 		return err
 	}
 
-	return typeconv.Convert(to, r.resource.value)
+	return typeconv.Convert(to, r.entry.value)
 }
 
 func (r *Resource) Update(val interface{}) error {
 	checkLocked(r.isLocked)
 
-	r.resource.valueMu.Lock()
-	defer r.resource.valueMu.Unlock()
+	r.entry.valueMux.Lock()
+	defer r.entry.valueMux.Unlock()
 
 	if err := r.initValue(); err != nil {
 		return err
 	}
-	return typeconv.Convert(&r.resource.value, val)
+	return typeconv.Convert(&r.entry.value, val)
 }
 
 func (r *Resource) initValue() error {
-	if r.resource.value != nil {
+	if r.entry.value != nil {
 		return nil
 	}
 
@@ -192,7 +196,7 @@ func (r *Resource) initValue() error {
 			return err
 		}
 
-		r.resource.value = common.MapStr{}
+		r.entry.value = common.MapStr{}
 		if vd == nil {
 			return nil
 		}
