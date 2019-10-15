@@ -15,221 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Package statestore provides coordinated access to entries in the registry
+// via resources.
+//
+// A Store supports selective update of fields using go structures.
+// Data to be stored in the registry should be split into resource identifying
+// meta-data and read state data. This allows inputs to have separate
+// go-routines for updating resource tracking meta-data (like file path upon
+// file renames) and for read state updates (like file offset).
+//
+// The registry is only eventually consistent to the current state of the
+// store. When using (*Resource).Update, both the in-memory state and the
+// registry state will be updated immediately. But when using
+// (*Resource).UpdateOp, only the in memory state will be updated. The
+// registry state must be updated using the ResourceUpdateOp, after the
+// associated events have been ACKed by the outputs. Once all pending update operations have been applied
+// the in-memory state and the persistent state are assumed to be in-sync, and
+// the in-memory state is dropped so to free some memory.
+//
+// The eventual consistency allows resources to be Unlocked and Locked by another go-routine
+// immediately, as the final read state from the former go-routine is available
+// right away. The lock guarantees exclusive access. In the meantime older
+// updates might still be applied to the registry file, while the new
+// go-routine can start creating new update operations concurrently to be
+// applied to after already pending updates.
 package statestore
 
-import (
-	"runtime"
-	"sync"
-
-	"github.com/pkg/errors"
-
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/common/transform/typeconv"
-	"github.com/elastic/beats/libbeat/registry"
-)
-
-type Store struct {
-	persistentStore *registry.Store
-
-	resourcesMux sync.Mutex
-	resources    table
-}
-
 type ResourceKey string
-
-type Resource struct {
-	store    *Store
-	isLocked bool
-
-	key   ResourceKey
-	entry *resourceEntry
-}
-
-type RegistryResource Resource
-
-type ResourceUpdateOp struct {
-	store    *Store
-	resource *resourceEntry
-	key      registry.Key
-	val      interface{}
-}
-
-func (s *Store) Access(key ResourceKey) *Resource {
-	return newResource(s, key)
-}
-
-// Lock locks and returns the resource for a given key.
-func (s *Store) Lock(key ResourceKey) *Resource {
-	res := s.Access(key)
-	res.Lock()
-	return res
-}
-
-// TryLock locks and returns the resource for a given key.
-// The nil value is returned if the resource could not be locked.
-func (s *Store) TryLock(key ResourceKey) *Resource {
-	res := s.Access(key)
-	if !res.TryLock() {
-		res.close()
-		return nil
-	}
-	return res
-}
-
-func newResource(store *Store, key ResourceKey) *Resource {
-	res := &Resource{
-		store:    store,
-		isLocked: false,
-		key:      key,
-	}
-
-	// in case we miss an unlock operation (programmer error or panic that hash
-	// been caught) we set a finalizer to eventually free the resource.
-	// The Unlock operation will unsert the finalizer.
-	runtime.SetFinalizer(res, (*Resource).finalize)
-	return res
-}
-
-func (r *Resource) Lock() {
-	if r.isLocked {
-		panic(errors.New("trying to lock already locked resource"))
-	}
-
-	store := r.store
-	store.resourcesMux.Lock()
-	entry := store.resources.GetOrCreate(r.key)
-	store.resourcesMux.Unlock()
-
-	entry.Lock()
-	r.isLocked = true
-	r.entry = entry
-}
-
-func (r *Resource) TryLock() bool {
-	if r.isLocked {
-		panic(errors.New("trying to lock already locked resource"))
-	}
-
-	store := r.store
-	store.resourcesMux.Lock()
-	defer store.resourcesMux.Unlock()
-
-	entry := store.resources.GetOrCreate(r.key)
-	r.isLocked = entry.TryLock()
-
-	if !r.isLocked {
-		if entry.Release() {
-			store.resources.Remove(r.key)
-		}
-	} else {
-		r.entry = entry
-	}
-	return r.isLocked
-}
-
-func (r *Resource) Unlock() {
-	if !r.isLocked {
-		panic(errors.New("trying to lock unlocked resource"))
-	}
-
-	r.close()
-}
-
-func (r *Resource) close() {
-	runtime.SetFinalizer(r, nil)
-	r.finalize()
-}
-
-func (r *Resource) finalize() {
-	if !r.isLocked {
-		return
-	}
-
-	store := r.store
-	store.resourcesMux.Lock()
-	defer store.resourcesMux.Unlock()
-
-	entry := r.entry
-	entry.Unlock()
-	r.entry = nil
-
-	if entry.Release() {
-		store.resources.Remove(r.key)
-	}
-}
-
-func (r *Resource) Unmarshal(to interface{}) error {
-	checkLocked(r.isLocked)
-
-	err := func() error {
-		r.entry.valueMux.Lock()
-		defer r.entry.valueMux.Unlock()
-		return r.initValue()
-	}()
-	if err != nil {
-		return err
-	}
-
-	return typeconv.Convert(to, r.entry.value)
-}
-
-func (r *Resource) Update(val interface{}) error {
-	checkLocked(r.isLocked)
-
-	r.entry.valueMux.Lock()
-	defer r.entry.valueMux.Unlock()
-
-	if err := r.initValue(); err != nil {
-		return err
-	}
-	return typeconv.Convert(&r.entry.value, val)
-}
-
-func (r *Resource) initValue() error {
-	if r.entry.value != nil {
-		return nil
-	}
-
-	err := r.store.persistentStore.View(func(tx *registry.Tx) error {
-		vd, err := tx.Get(registry.Key(r.key))
-		if err != nil {
-			return err
-		}
-
-		r.entry.value = common.MapStr{}
-		if vd == nil {
-			return nil
-		}
-		return vd.Decode(&r.resource.value)
-	})
-
-	if err != nil {
-		return errors.Wrapf(err,
-			"failed to access the resource '%s' in the registry", r.key)
-	}
-	return nil
-}
-
-func (r *Resource) Registry() *RegistryResource {
-	return (*RegistryResource)(r)
-}
-
-func (r *RegistryResource) Update(val interface{}) error {
-	checkLocked(r.isLocked)
-
-	return r.store.persistentStore.Update(func(tx *registry.Tx) error {
-		return tx.Update(registry.Key(r.key), val)
-	})
-}
-
-func (r *RegistryResource) CreateUpdateLog(val interface{}) (ResourceUpdateOp, error) {
-	checkLocked(r.isLocked)
-
-	panic("TODO")
-}
-
-func checkLocked(b bool) {
-	if !b {
-		panic("try to access unlocked resource")
-	}
-}

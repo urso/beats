@@ -24,42 +24,51 @@ import (
 	"github.com/elastic/go-concert/atomic"
 )
 
+// In memory registry state table. Updates are written directly to this table.
+// As long as there are pending operations, we read the state from this table.
+// If there is no entry with cached value present, we assume the registry to be
+// in sync with all updates applied.
+// Entries are reference counted allowing us to free space in the table if there is
+// no more go-routine potentially accessing a resource.
 type table map[ResourceKey]*resourceEntry
 
+// resourceEntry keeps track of actual resource locks and pending updates.
 type resourceEntry struct {
-	key  ResourceKey
-	lock chan struct{}
-
+	key      ResourceKey
 	refCount atomic.Uint
-
-	valueMux sync.Mutex
-	value    common.MapStr
+	lock     chan struct{}
+	value    valueState
 }
 
-func (t table) GetOrCreate(k ResourceKey) *resourceEntry {
-	r := t.Find(k)
-	if r == nil {
-		lock := make(chan struct{}, 1)
-		lock <- struct{}{}
-		r = &resourceEntry{
-			key:      k,
-			lock:     lock,
-			refCount: atomic.MakeUint(1),
-		}
-		t[k] = r
-	} else {
-		r.Retain()
-	}
+// valueState keeps track of pending updates to a value.
+// As long as there are pending updates, cached holds the last known correct value
+// and pending will be > 0.
+// If `pending` is 0, then the state store and the persistent registry are in sync.
+// In this case `cached` will be nil and the registry is used for reading a value.
+type valueState struct {
+	mux     sync.Mutex
+	pending uint          // pending updates until value is in sync
+	cached  common.MapStr // current value if state == valueOutOfSync
+}
 
+func (t table) Create(k ResourceKey) *resourceEntry {
+	lock := make(chan struct{}, 1)
+	lock <- struct{}{}
+	r := &resourceEntry{
+		key:      k,
+		lock:     lock,
+		refCount: atomic.MakeUint(1),
+	}
+	t[k] = r
 	return r
 }
 
 func (t table) Find(k ResourceKey) *resourceEntry {
-	res := t[k]
-	if res != nil {
-		res.refCount.Inc()
+	r := t[k]
+	if r != nil {
+		r.Retain()
 	}
-	return res
+	return r
 }
 
 func (t table) Remove(k ResourceKey) {
