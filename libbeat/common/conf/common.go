@@ -17,7 +17,10 @@
 
 package conf
 
-import ucfg "github.com/elastic/go-ucfg"
+import (
+	"github.com/elastic/beats/libbeat/logp"
+	ucfg "github.com/elastic/go-ucfg"
+)
 
 // default go-ucfg options to use for all configurations.
 var configOpts = []ucfg.Option{
@@ -30,3 +33,12 @@ var configOpts = []ucfg.Option{
 func OverwriteConfigOpts(options []ucfg.Option) {
 	configOpts = options
 }
+
+const (
+	selectorConfig             = "config"
+	selectorConfigWithPassword = "config-with-passwords"
+)
+
+// make hasSelector and configDebugf available for unit testing
+var hasSelector = logp.HasSelector
+var configDebugf = logp.Debug

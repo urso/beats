@@ -21,8 +21,7 @@ import (
 	"flag"
 	"strings"
 
-	ucfg "github.com/elastic/go-ucfg"
-	cfgflag "github.com/elastic/go-ucfg/flag"
+	"github.com/elastic/beats/libbeat/common/conf"
 )
 
 // StringsFlag collects multiple usages of the same flag into an array of strings.
@@ -33,18 +32,7 @@ type StringsFlag struct {
 	flag      *flag.Flag
 }
 
-// SettingsFlag captures key/values pairs into an Config object.
-// The flag backed by SettingsFlag can be used multiple times.
-// Values are overwritten by the last usage of a key.
-type SettingsFlag cfgflag.FlagValue
-
-// flagOverwrite provides a flag value, which always overwrites the same setting
-// in an Config object.
-type flagOverwrite struct {
-	config *ucfg.Config
-	path   string
-	value  string
-}
+type SettingsFlag = conf.SettingsFlag
 
 // StringArrFlag creates and registers a new StringsFlag with the given FlagSet.
 // If no FlagSet is passed, flag.CommandLine will be used as target FlagSet.
@@ -163,67 +151,19 @@ func (f *StringsFlag) Type() string {
 // SettingFlag defines a setting flag, name and it's usage. The return value is
 // the Config object settings are applied to.
 func SettingFlag(fs *flag.FlagSet, name, usage string) *Config {
-	cfg := NewConfig()
-	SettingVarFlag(fs, cfg, name, usage)
-	return cfg
+	return conf.SettingFlag(fs, name, usage)
 }
 
 // SettingVarFlag defines a setting flag, name and it's usage.
 // Settings are applied to the Config object passed.
 func SettingVarFlag(fs *flag.FlagSet, def *Config, name, usage string) {
-	if fs == nil {
-		fs = flag.CommandLine
-	}
-
-	f := NewSettingsFlag(def)
-	fs.Var(f, name, usage)
+	conf.SettingVarFlag(fs, def, name, usage)
 }
 
 // NewSettingsFlag creates a new SettingsFlag instance, not registered with any
 // FlagSet.
 func NewSettingsFlag(def *Config) *SettingsFlag {
-	opts := append(
-		[]ucfg.Option{
-			ucfg.MetaData(ucfg.Meta{Source: "command line flag"}),
-		},
-		configOpts...,
-	)
-
-	tmp := cfgflag.NewFlagKeyValue(def.access(), true, opts...)
-	return (*SettingsFlag)(tmp)
-}
-
-func (f *SettingsFlag) access() *cfgflag.FlagValue {
-	return (*cfgflag.FlagValue)(f)
-}
-
-// Config returns the config object the SettingsFlag stores applied settings to.
-func (f *SettingsFlag) Config() *Config {
-	return fromConfig(f.access().Config())
-}
-
-// Set sets a settings value in the Config object.  The input string must be a
-// key-value pair like `key=value`. If the value is missing, the value is set
-// to the boolean value `true`.
-func (f *SettingsFlag) Set(s string) error {
-	return f.access().Set(s)
-}
-
-// Get returns the Config object used to store values.
-func (f *SettingsFlag) Get() interface{} {
-	return f.Config()
-}
-
-// String always returns an empty string. It is required to fulfil
-// the flag.Value interface.
-func (f *SettingsFlag) String() string {
-	return ""
-}
-
-// Type reports the type of contents (setting=value) expected to be parsed by Set.
-// It is used to build the CLI usage string.
-func (f *SettingsFlag) Type() string {
-	return "setting=value"
+	return conf.NewSettingsFlag(def)
 }
 
 // ConfigOverwriteFlag defines a new flag updating a setting in an Config
@@ -234,57 +174,5 @@ func ConfigOverwriteFlag(
 	config *Config,
 	name, path, def, usage string,
 ) *string {
-	if config == nil {
-		panic("Missing configuration")
-	}
-	if path == "" {
-		panic("empty path")
-	}
-
-	if fs == nil {
-		fs = flag.CommandLine
-	}
-
-	if def != "" {
-		err := config.SetString(path, -1, def)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	f := newOverwriteFlag(config, path, def)
-	fs.Var(f, name, usage)
-	return &f.value
-}
-
-func newOverwriteFlag(config *Config, path, def string) *flagOverwrite {
-	return &flagOverwrite{config: config.access(), path: path, value: def}
-}
-
-func (f *flagOverwrite) String() string {
-	return f.value
-}
-
-func (f *flagOverwrite) Set(v string) error {
-	opts := append(
-		[]ucfg.Option{
-			ucfg.MetaData(ucfg.Meta{Source: "command line flag"}),
-		},
-		configOpts...,
-	)
-
-	err := f.config.SetString(f.path, -1, v, opts...)
-	if err != nil {
-		return err
-	}
-	f.value = v
-	return nil
-}
-
-func (f *flagOverwrite) Get() interface{} {
-	return f.value
-}
-
-func (f *flagOverwrite) Type() string {
-	return "string"
+	return conf.ConfigOverwriteFlag(fs, config, name, path, def, usage)
 }

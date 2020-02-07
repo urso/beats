@@ -20,9 +20,9 @@ package conf
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
+	"github.com/elastic/beats/libbeat/common/mapstrings"
 	ucfg "github.com/elastic/go-ucfg"
 	"github.com/elastic/go-ucfg/yaml"
 )
@@ -99,29 +99,54 @@ func (c *Config) Enabled() bool {
 	return testEnabled.Enabled
 }
 
-func (c *Config) ToString(filter bool) string {
-	var buf strings.Builder
-	err := c.format(&buf, filter)
-	if err != nil {
-		return fmt.Sprintf("<config error> %v", err)
+func (c *Config) PrintDebugf(msg string, params ...interface{}) {
+	selector := selectorConfigWithPassword
+	filtered := false
+	if !hasSelector(selector) {
+		selector = selectorConfig
+		filtered = true
+
+		if !hasSelector(selector) {
+			return
+		}
 	}
-	return buf.String()
+
+	debugStr := c.ToString(filtered)
+	if debugStr != "" {
+		configDebugf(selector, "%s\n%s", fmt.Sprintf(msg, params...), debugStr)
+	}
 }
 
-func (c *Config) format(buf io.Writer, filter bool) error {
+func (c *Config) ToString(redact bool) string {
+	var bufs []string
+
 	if c.IsDict() {
 		var content map[string]interface{}
 		if err := c.Unpack(&content); err != nil {
-			return err
-
-			fmt.Fprintf(buf, "<config error> %v", err)
+			return fmt.Sprintf("<config error> %v", err)
 		}
-		if filterPrivate {
-			applyLoggingMask(content)
+		if redact {
+			content = mapstrings.Redact(content, "", nil).(map[string]interface{})
 		}
 		j, _ := json.MarshalIndent(content, "", "  ")
 		bufs = append(bufs, string(j))
 	}
+	if c.IsArray() {
+		var content []interface{}
+		if err := c.Unpack(&content); err != nil {
+			return fmt.Sprintf("<config error> %v", err)
+		}
+		if redact {
+			content = mapstrings.Redact(content, "", nil).([]interface{})
+		}
+		j, _ := json.MarshalIndent(content, "", "  ")
+		bufs = append(bufs, string(j))
+	}
+
+	if len(bufs) == 0 {
+		return ""
+	}
+	return strings.Join(bufs, "\n")
 }
 
 func (c *Config) Merge(from interface{}) error {

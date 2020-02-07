@@ -18,18 +18,10 @@
 package common
 
 import (
-	"encoding/json"
 	"flag"
-	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 
 	"github.com/elastic/beats/libbeat/common/conf"
-	"github.com/elastic/beats/libbeat/common/file"
-	"github.com/elastic/beats/libbeat/common/mapstrings"
-	"github.com/elastic/beats/libbeat/logp"
 	ucfg "github.com/elastic/go-ucfg"
 )
 
@@ -51,17 +43,9 @@ type Config = conf.Config
 // ConfigNamespace storing at most one configuration section by name and sub-section.
 type ConfigNamespace = conf.Namespace
 
-const (
-	selectorConfig             = "config"
-	selectorConfigWithPassword = "config-with-passwords"
-)
-
-// make hasSelector and configDebugf available for unit testing
-var hasSelector = logp.HasSelector
-var configDebugf = logp.Debug
-
+// NewConfig creates a new empty configuration object.
 func NewConfig() *Config {
-	return conf.NewConfig()
+	return conf.New()
 }
 
 // NewConfigFrom creates a new Config object from the given input.
@@ -86,6 +70,7 @@ func MustNewConfigFrom(from interface{}) *Config {
 	return conf.MustNewFrom(from)
 }
 
+// MergeConfigs combines multiple configurations into a single one.
 func MergeConfigs(cfgs ...*Config) (*Config, error) {
 	return conf.Combine(cfgs...)
 }
@@ -113,91 +98,8 @@ func LoadFiles(paths ...string) (*Config, error) {
 	return l.LoadAll(paths...)
 }
 
-func (c *Config) PrintDebugf(msg string, params ...interface{}) {
-	selector := selectorConfigWithPassword
-	filtered := false
-	if !hasSelector(selector) {
-		selector = selectorConfig
-		filtered = true
-
-		if !hasSelector(selector) {
-			return
-		}
-	}
-
-	debugStr := DebugString(c, filtered)
-	if debugStr != "" {
-		configDebugf(selector, "%s\n%s", fmt.Sprintf(msg, params...), debugStr)
-	}
-}
-
 // DebugString prints a human readable representation of the underlying config using
 // JSON formatting.
 func DebugString(c *Config, filterPrivate bool) string {
-	var bufs []string
-
-	if c.IsDict() {
-		var content map[string]interface{}
-		if err := c.Unpack(&content); err != nil {
-			return fmt.Sprintf("<config error> %v", err)
-		}
-		if filterPrivate {
-			content = mapstrings.Redact(content, "", nil).(map[string]interface{})
-		}
-		j, _ := json.MarshalIndent(content, "", "  ")
-		bufs = append(bufs, string(j))
-	}
-	if c.IsArray() {
-		var content []interface{}
-		if err := c.Unpack(&content); err != nil {
-			return fmt.Sprintf("<config error> %v", err)
-		}
-		if filterPrivate {
-			content = mapstrings.Redact(content, "", nil).([]interface{})
-		}
-		j, _ := json.MarshalIndent(content, "", "  ")
-		bufs = append(bufs, string(j))
-	}
-
-	if len(bufs) == 0 {
-		return ""
-	}
-	return strings.Join(bufs, "\n")
-}
-
-// OwnerHasExclusiveWritePerms asserts that the current user or root is the
-// owner of the config file and that the config file is (at most) writable by
-// the owner or root (e.g. group and other cannot have write access).
-func OwnerHasExclusiveWritePerms(name string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-
-	info, err := file.Stat(name)
-	if err != nil {
-		return err
-	}
-
-	euid := os.Geteuid()
-	fileUID, _ := info.UID()
-	perm := info.Mode().Perm()
-
-	if fileUID != 0 && euid != fileUID {
-		return fmt.Errorf(`config file ("%v") must be owned by the user identifier `+
-			`(uid=%v) or root`, name, euid)
-	}
-
-	// Test if group or other have write permissions.
-	if perm&0022 > 0 {
-		nameAbs, err := filepath.Abs(name)
-		if err != nil {
-			nameAbs = name
-		}
-		return fmt.Errorf(`config file ("%v") can only be writable by the `+
-			`owner but the permissions are "%v" (to fix the permissions use: `+
-			`'chmod go-w %v')`,
-			name, perm, nameAbs)
-	}
-
-	return nil
+	return c.ToString(filterPrivate)
 }

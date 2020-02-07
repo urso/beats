@@ -28,7 +28,7 @@ type Namespace struct {
 // Unpack unpacks a configuration with at most one sub object. An sub object is
 // ignored if it is disabled by setting `enabled: false`. If the configuration
 // passed contains multiple active sub objects, Unpack will return an error.
-func (ns *ConfigNamespace) Unpack(cfg *Config) error {
+func (ns *Namespace) Unpack(cfg *Config) error {
 	fields := cfg.GetFields()
 	if len(fields) == 0 {
 		return nil
@@ -70,16 +70,16 @@ func (ns *ConfigNamespace) Unpack(cfg *Config) error {
 }
 
 // Name returns the configuration sections it's name if a section has been set.
-func (ns *ConfigNamespace) Name() string {
+func (ns *Namespace) Name() string {
 	return ns.name
 }
 
 // Config return the sub-configuration section if a section has been set.
-func (ns *ConfigNamespace) Config() *Config {
+func (ns *Namespace) Config() *Config {
 	return ns.config
 }
 
 // IsSet returns true if a sub-configuration section has been set.
-func (ns *ConfigNamespace) IsSet() bool {
+func (ns *Namespace) IsSet() bool {
 	return ns.config != nil
 }
