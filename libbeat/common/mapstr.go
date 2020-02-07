@@ -27,6 +27,8 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/elastic/beats/libbeat/common/mapstrings"
 )
 
 // Event metadata constants. These keys are used within libbeat to identify
@@ -52,6 +54,11 @@ type EventMetadata struct {
 // MapStr is a map[string]interface{} wrapper with utility methods for common
 // map operations like converting to JSON.
 type MapStr map[string]interface{}
+
+// mapStrLog is used to log a MapStr object with zap. This type guarantees that
+// we do not copy and redact each sub-map over and over again when encodign
+// recursively.
+type mapStrLog map[string]interface{}
 
 // Update copies all the key-value pairs from d to this map. If the key
 // already exists then it is overwritten. This method does not merge nested
@@ -219,21 +226,24 @@ func (m MapStr) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		return nil
 	}
 
-	debugM := m.Clone()
-	applyLoggingMask(map[string]interface{}(debugM))
+	// redact and change type to mapStrLog when encoding.
+	debugM := mapstrings.Redact(m, "", nil).(map[string]interface{})
+	logObj := mapStrLog(debugM)
+	return logObj.MarshalLogObject(enc)
+}
 
-	keys := make([]string, 0, len(debugM))
-	for k := range debugM {
-		keys = append(keys, k)
-	}
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface and allows
+// for more efficient marshaling of MapStr in structured logging.
+func (m mapStrLog) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	keys := mapstrings.Keys(m)
 	sort.Strings(keys)
 	for _, k := range keys {
-		v := debugM[k]
+		v := m[k]
 		if inner, ok := tryToMapStr(v); ok {
-			enc.AddObject(k, inner)
-			continue
+			enc.AddObject(k, mapStrLog(inner))
+		} else {
+			zap.Any(k, v).AddTo(enc)
 		}
-		zap.Any(k, v).AddTo(enc)
 	}
 	return nil
 }
@@ -245,10 +255,8 @@ func (m MapStr) Format(f fmt.State, c rune) {
 		return
 	}
 
-	debugM := m.Clone()
-	applyLoggingMask(map[string]interface{}(debugM))
-
-	io.WriteString(f, debugM.String())
+	debugM := mapstrings.Redact(m, "", nil).(map[string]interface{})
+	io.WriteString(f, MapStr(debugM).String())
 }
 
 // Flatten flattens the given MapStr and returns a flat MapStr.

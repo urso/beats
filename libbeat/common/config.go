@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/elastic/beats/libbeat/common/file"
+	"github.com/elastic/beats/libbeat/common/mapstrings"
 	"github.com/elastic/beats/libbeat/logp"
 	ucfg "github.com/elastic/go-ucfg"
 	"github.com/elastic/go-ucfg/cfgutil"
@@ -357,7 +358,7 @@ func DebugString(c *Config, filterPrivate bool) string {
 			return fmt.Sprintf("<config error> %v", err)
 		}
 		if filterPrivate {
-			applyLoggingMask(content)
+			content = mapstrings.Redact(content, "", nil).(map[string]interface{})
 		}
 		j, _ := json.MarshalIndent(content, "", "  ")
 		bufs = append(bufs, string(j))
@@ -368,7 +369,7 @@ func DebugString(c *Config, filterPrivate bool) string {
 			return fmt.Sprintf("<config error> %v", err)
 		}
 		if filterPrivate {
-			applyLoggingMask(content)
+			content = mapstrings.Redact(content, "", nil).([]interface{})
 		}
 		j, _ := json.MarshalIndent(content, "", "  ")
 		bufs = append(bufs, string(j))
