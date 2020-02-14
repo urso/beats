@@ -22,6 +22,7 @@ import (
 
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/go-concert"
+	"github.com/elastic/go-concert/unison"
 )
 
 // In memory registry state table. Updates are written directly to this table.
@@ -38,7 +39,7 @@ type table struct {
 type resourceEntry struct {
 	key      ResourceKey
 	refCount concert.RefCount
-	lock     chan struct{}
+	mu       unison.Mutex
 	value    valueState
 }
 
@@ -58,11 +59,9 @@ func (t *table) Empty() bool {
 }
 
 func (t *table) Create(k ResourceKey) *resourceEntry {
-	lock := make(chan struct{}, 1)
-	lock <- struct{}{}
 	r := &resourceEntry{
-		key:  k,
-		lock: lock,
+		key:   k,
+		local: unison.MakeMutex(),
 	}
 	t.m[k] = r
 	return r
@@ -81,18 +80,13 @@ func (t *table) Remove(k ResourceKey) {
 }
 
 func (r *resourceEntry) Lock() {
-	<-r.lock
+	r.mu.Lock()
 }
 
 func (r *resourceEntry) TryLock() bool {
-	select {
-	case <-r.lock:
-		return true
-	default:
-		return false
-	}
+	return r.mu.TryLock()
 }
 
 func (r *resourceEntry) Unlock() {
-	r.lock <- struct{}{}
+	r.mu.Unlock()
 }

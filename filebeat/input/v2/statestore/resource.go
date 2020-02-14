@@ -89,7 +89,6 @@ func (r *Resource) unlink() {
 
 	entry := r.entry
 	r.entry = nil
-
 	r.store.shared.releaseEntry(entry)
 }
 
@@ -97,6 +96,8 @@ func (r *Resource) unlink() {
 // available.
 func (r *Resource) Lock() {
 	checkNotLocked(r.IsLocked())
+
+	session := r.store.session
 
 	r.link(true)
 	r.entry.Lock()

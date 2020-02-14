@@ -41,5 +41,74 @@
 // applied to after already pending updates.
 package statestore
 
+import (
+	"github.com/elastic/go-concert/atomic"
+)
+
 // ResourceKey is used to describe an unique resource to be stored in the registry.
 type ResourceKey string
+
+// Store provides some coordinates access to a registry.Store.
+// All update and read operations require users to acquire a resource first.
+// A Resource must be locked before it can be modified. This ensures that at most
+// one go-routine has access to a resource. Lock/TryLock/Unlock can be used to
+// coordinate resource access even between independent components.
+//
+// Updates in the shared store can be ahead of the globalStore. Updates will be eventually synchronised to the global store
+// via update operations that are finally executed. Locks already released on the shared store are not yet released in the global store,
+type Store struct {
+	active atomic.Bool
+
+	session *storeSession
+}
+
+// NewStore creates a new Store.
+func newStore(session *storeSession) *Store {
+	invariant(session != nil, "missing a persistent store")
+
+	return &Store{
+		active:  atomic.MakeBool(true),
+		session: session,
+	}
+}
+
+// Close deactivates the store and waits for all resources to be released.
+// Resources can not be accessed anymore, but in progress resource updates are
+// still active, until they are eventually ACKed.  The underlying persistent
+// store will be finally closed once all pending updates have been written to
+// the persistent store.
+func (s *Store) Close() {
+	s.active.Store(false)
+	s.session.Release()
+}
+
+// Access an unlocked resource. This creates a handle to a resource that may
+// not yet exist in the persistent registry.
+func (s *Store) Access(key ResourceKey) *Resource {
+	return newResource(s, key)
+}
+
+func (s *Store) findOrCreate(key ResourceKey, lm lockMode) (res *resourceEntry) {
+	if !s.active.Load() {
+		return nil
+	}
+	return s.session.findOrCreate(key, lm)
+}
+
+// find returns the in memory resource entry, if the key is known to the store.
+// find returns nil if the resource is unknown so far.
+func (s *Store) find(key ResourceKey, lm lockMode) (res *resourceEntry) {
+	if !s.active.Load() {
+		return nil
+	}
+	return s.shared.find(key, lm)
+}
+
+// create adds a new entry to the in-memory table and returns the pointer to the entry.
+// It fails if the store has been deactivated and returns 'null'.
+func (s *Store) create(key ResourceKey, lm lockMode) (res *resourceEntry) {
+	if !s.active.Load() {
+		return nil
+	}
+	return s.shared.create(key, lm)
+}

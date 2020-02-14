@@ -22,26 +22,32 @@ import (
 
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/registry"
+	"github.com/elastic/go-concert/unison"
 )
 
 // Connector is used to connect to a store backed by a registry.
 type Connector struct {
 	log      *logp.Logger
+	lockmngr *unison.LockManager
 	registry *registry.Registry
 
-	mux sync.Mutex
-
 	// set of stores currently with at least one active session.
+	mux    sync.Mutex
 	stores map[string]*sharedStore
 }
 
 // NewConnector creates a new store connector for accessing a resource Store.
-func NewConnector(log *logp.Logger, reg *registry.Registry) *Connector {
+func NewConnector(
+	log *logp.Logger,
+	lockmngr *unison.LockManager,
+	reg *registry.Registry,
+) *Connector {
 	invariant(log != nil, "missing logger")
 	invariant(reg != nil, "missing registry")
 
 	return &Connector{
 		log:      log,
+		lockmngr: lockmngr,
 		registry: reg,
 		stores:   map[string]*sharedStore{},
 	}
@@ -65,30 +71,35 @@ func (c *Connector) Open(name string) (*Store, error) {
 	shared := c.stores[name]
 	if shared == nil {
 		shared = &sharedStore{
-			name:            name,
-			persistentStore: persistentStore,
-			resources:       table{},
+			name:      name,
+			resources: table{},
 		}
 		c.stores[name] = shared
 	} else {
 		shared.refCount.Retain()
 	}
 
+	session := newSession(c, newGlobalStore(name, c.lockmngr, persistentStore), shared)
+
 	ok = true
-	return newStore(newSession(c, shared)), nil
+	return newStore(session), nil
 }
 
-func (c *Connector) releaseStore(store *sharedStore) {
+func (c *Connector) releaseStore(
+	global *globalStore,
+	local *sharedStore,
+) {
 	c.mux.Lock()
-	released := store.refCount.Release()
+	released := local.refCount.Release()
 	if released {
-		delete(c.stores, store.name)
+		delete(c.stores, local.name)
 	}
 	c.mux.Unlock()
 
 	if released {
-		store.close()
+		local.close()
 	}
+	global.Close()
 }
 
 func ifNotOK(b *bool, fn func()) {
