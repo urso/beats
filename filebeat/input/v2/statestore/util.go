@@ -16,3 +16,52 @@
 // under the License.
 
 package statestore
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+)
+
+type lockMode int
+
+const (
+	lockRequired lockMode = iota
+	lockAlreadyTaken
+	lockMustRelease
+)
+
+func withLockMode(mux *sync.Mutex, lm lockMode, fn func() error) error {
+	switch lm {
+	case lockRequired:
+		mux.Lock()
+		defer mux.Unlock()
+	case lockMustRelease:
+		defer mux.Unlock()
+	case lockAlreadyTaken:
+	default:
+		panic(fmt.Errorf("unknown lock mode: %v", lm))
+	}
+
+	return fn()
+}
+
+func ifNotOK(b *bool, fn func()) {
+	if !(*b) {
+		fn()
+	}
+}
+
+func checkLocked(b bool) {
+	invariant(!b, "try to access unlocked resource")
+}
+
+func checkNotLocked(b bool) {
+	invariant(b, "invalid operation on locked resource")
+}
+
+func invariant(b bool, message string) {
+	if !b {
+		panic(errors.New(message))
+	}
+}

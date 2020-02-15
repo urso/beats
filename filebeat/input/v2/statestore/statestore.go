@@ -88,27 +88,10 @@ func (s *Store) Access(key ResourceKey) *Resource {
 	return newResource(s, key)
 }
 
-func (s *Store) findOrCreate(key ResourceKey, lm lockMode) (res *resourceEntry) {
-	if !s.active.Load() {
-		return nil
-	}
-	return s.session.findOrCreate(key, lm)
+func (s *Store) isOpen() bool {
+	return s.active.Load()
 }
 
-// find returns the in memory resource entry, if the key is known to the store.
-// find returns nil if the resource is unknown so far.
-func (s *Store) find(key ResourceKey, lm lockMode) (res *resourceEntry) {
-	if !s.active.Load() {
-		return nil
-	}
-	return s.shared.find(key, lm)
-}
-
-// create adds a new entry to the in-memory table and returns the pointer to the entry.
-// It fails if the store has been deactivated and returns 'null'.
-func (s *Store) create(key ResourceKey, lm lockMode) (res *resourceEntry) {
-	if !s.active.Load() {
-		return nil
-	}
-	return s.shared.create(key, lm)
+func (s *Store) isClosed() bool {
+	return !s.isOpen()
 }

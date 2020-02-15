@@ -17,7 +17,10 @@
 
 package statestore
 
-import "github.com/elastic/go-concert"
+import (
+	"github.com/elastic/beats/libbeat/registry"
+	"github.com/elastic/go-concert"
+)
 
 // storeSession keeps track of the lifetime of a Store instance.
 // In flight resource update operations do extend the lifetime of
@@ -27,8 +30,9 @@ import "github.com/elastic/go-concert"
 // update operations have been persisted.
 type storeSession struct {
 	refCount concert.RefCount
-	local    *sharedStore
-	global   *globalStore
+
+	local  *shadowStore
+	global *registry.Store
 
 	// keep track of owner, so we can remove close the shared store once the last
 	// session goes away.
@@ -37,8 +41,8 @@ type storeSession struct {
 
 func newSession(
 	connector *Connector,
-	global *globalStore,
-	local *sharedStore,
+	global *registry.Store,
+	local *shadowStore,
 ) *storeSession {
 	session := &storeSession{connector: connector, global: global, local: local}
 	session.refCount.Action = func(_ error) { session.Close() }
@@ -54,8 +58,3 @@ func (s *storeSession) Close() {
 
 func (s *storeSession) Retain()       { s.refCount.Retain() }
 func (s *storeSession) Release() bool { return s.refCount.Release() }
-
-func (s *storeSession) findOrCreate(key ResourceKey, lm lockMode) (res *resourceEntry) {
-	res = s.local.findOrCreate(key, lm)
-	return res
-}

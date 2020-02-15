@@ -18,7 +18,6 @@
 package statestore
 
 import (
-	"errors"
 	"runtime"
 
 	"github.com/elastic/beats/libbeat/common/transform/typeconv"
@@ -68,14 +67,18 @@ func (r *Resource) finalize() {
 }
 
 func (r *Resource) link(create bool) {
+	if r.store.isClosed() {
+		return
+	}
+
 	if r.entry != nil {
 		return
 	}
 
 	if create {
-		r.entry = r.store.findOrCreate(r.key, lockRequired)
+		r.entry = r.store.session.local.findOrCreate(r.key, lockRequired)
 	} else {
-		r.entry = r.store.find(r.key, lockRequired)
+		r.entry = r.store.session.local.find(r.key, lockRequired)
 	}
 }
 
@@ -89,15 +92,13 @@ func (r *Resource) unlink() {
 
 	entry := r.entry
 	r.entry = nil
-	r.store.shared.releaseEntry(entry)
+	r.store.session.local.releaseEntry(entry)
 }
 
 // Lock locks a resource held by the store. It blocks until the lock becomes
 // available.
 func (r *Resource) Lock() {
 	checkNotLocked(r.IsLocked())
-
-	session := r.store.session
 
 	r.link(true)
 	r.entry.Lock()
@@ -149,13 +150,13 @@ func (r *Resource) markUnlocked() {
 func (r *Resource) Has() (bool, error) {
 	const op = "resource/has"
 
-	if !r.store.active.Load() {
+	if r.store.isClosed() {
 		return false, raiseClosed(op)
 	}
 
 	has := false
 
-	err := r.store.shared.persistentStore.View(func(tx *registry.Tx) error {
+	err := r.store.session.global.View(func(tx *registry.Tx) error {
 		found, err := tx.Has(registry.Key(r.key))
 		if err == nil {
 			has = found
@@ -188,7 +189,7 @@ func (r *Resource) Has() (bool, error) {
 func (r *Resource) Update(val interface{}) error {
 	const op = "resource/update"
 
-	if !r.store.active.Load() {
+	if r.store.isClosed() {
 		return raiseClosed(op)
 	}
 
@@ -206,7 +207,7 @@ func (r *Resource) Update(val interface{}) error {
 		}
 	}
 
-	err := r.store.shared.persistentStore.Update(func(tx *registry.Tx) error {
+	err := r.store.session.global.Update(func(tx *registry.Tx) error {
 		return tx.Update(registry.Key(r.key), val)
 	})
 	if err != nil {
@@ -224,7 +225,7 @@ func (r *Resource) Update(val interface{}) error {
 func (r *Resource) Read(to interface{}) error {
 	const op = "resource/read"
 
-	if !r.store.active.Load() {
+	if r.store.isClosed() {
 		return raiseClosed(op)
 	}
 
@@ -247,7 +248,7 @@ func (r *Resource) Read(to interface{}) error {
 		entry.value.mux.Unlock()
 	}
 
-	err := r.store.shared.persistentStore.View(func(tx *registry.Tx) error {
+	err := r.store.session.global.View(func(tx *registry.Tx) error {
 		vd, err := tx.Get(registry.Key(r.key))
 		if err != nil || vd == nil {
 			return err
@@ -290,7 +291,7 @@ func (r *Resource) UpdateOp(val interface{}) (*ResourceUpdateOp, error) {
 	// load current state from persistent store if there is no cached entry in
 	// the resource.
 	if entry.value.pending == 0 {
-		err := r.store.shared.persistentStore.View(func(tx *registry.Tx) error {
+		err := r.store.session.global.View(func(tx *registry.Tx) error {
 			vd, err := tx.Get(registry.Key(r.key))
 			if err != nil || vd == nil {
 				return err
@@ -308,18 +309,4 @@ func (r *Resource) UpdateOp(val interface{}) (*ResourceUpdateOp, error) {
 
 	entry.value.pending++
 	return newUpdateOp(r.store.session, r.key, entry, val), nil
-}
-
-func checkLocked(b bool) {
-	invariant(!b, "try to access unlocked resource")
-}
-
-func checkNotLocked(b bool) {
-	invariant(b, "invalid operation on locked resource")
-}
-
-func invariant(b bool, message string) {
-	if !b {
-		panic(errors.New(message))
-	}
 }

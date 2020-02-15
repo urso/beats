@@ -25,22 +25,13 @@ import (
 	"github.com/elastic/go-concert/unison"
 )
 
-// In memory registry state table. Updates are written directly to this table.
-// As long as there are pending operations, we read the state from this table.
-// If there is no entry with cached value present, we assume the registry to be
-// in sync with all updates applied.
-// Entries are reference counted allowing us to free space in the table if there is
-// no more go-routine potentially accessing a resource.
-type table struct {
-	m map[ResourceKey]*resourceEntry
-}
-
 // resourceEntry keeps track of actual resource locks and pending updates.
 type resourceEntry struct {
-	key      ResourceKey
-	refCount concert.RefCount
-	mu       unison.Mutex
-	value    valueState
+	key        ResourceKey
+	refCount   concert.RefCount
+	globalLock *globalLock
+	mu         unison.Mutex
+	value      valueState
 }
 
 // valueState keeps track of pending updates to a value.
@@ -54,39 +45,27 @@ type valueState struct {
 	cached  common.MapStr // current value if state == valueOutOfSync
 }
 
-func (t *table) Empty() bool {
-	return len(t.m) == 0
-}
-
-func (t *table) Create(k ResourceKey) *resourceEntry {
-	r := &resourceEntry{
-		key:   k,
-		local: unison.MakeMutex(),
-	}
-	t.m[k] = r
-	return r
-}
-
-func (t *table) Find(k ResourceKey) *resourceEntry {
-	entry := t.m[k]
-	if entry != nil {
-		entry.refCount.Retain()
-	}
-	return entry
-}
-
-func (t *table) Remove(k ResourceKey) {
-	delete(t.m, k)
-}
-
 func (r *resourceEntry) Lock() {
+	r.globalLock.Lock()
 	r.mu.Lock()
 }
 
 func (r *resourceEntry) TryLock() bool {
-	return r.mu.TryLock()
+	if !r.globalLock.TryLock() {
+		return false
+	}
+
+	if !r.mu.TryLock() {
+		r.globalLock.Unlock()
+		return false
+	}
+
+	return true
 }
 
 func (r *resourceEntry) Unlock() {
+	// Unlock can panic -> ensure we always run globalLock.Unlock()
+	defer r.globalLock.Unlock()
+
 	r.mu.Unlock()
 }

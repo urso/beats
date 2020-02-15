@@ -54,8 +54,8 @@ func newUpdateOp(session *storeSession, key ResourceKey, entry *resourceEntry, u
 // the provided store.  If possible the helper should keep the transaction open
 // if an array of operations are applied.
 func (op *ResourceUpdateOp) ApplyWith(withTx func(*registry.Store, func(*registry.Tx) error) error) error {
-	store := op.session.store
-	err := withTx(store.persistentStore, func(tx *registry.Tx) error {
+	store := op.session.global
+	err := withTx(store, func(tx *registry.Tx) error {
 		return tx.Update(registry.Key(op.key), op.updates)
 	})
 	op.applied = true
@@ -95,6 +95,5 @@ func (op *ResourceUpdateOp) closePending() {
 }
 
 func (op *ResourceUpdateOp) unlink() {
-	store, entry := op.session.store, op.entry
-	store.releaseEntry(entry)
+	op.session.local.releaseEntry(op.entry)
 }
