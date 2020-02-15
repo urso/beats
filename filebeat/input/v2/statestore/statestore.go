@@ -42,6 +42,8 @@
 package statestore
 
 import (
+	"github.com/elastic/beats/libbeat/registry"
+	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/atomic"
 )
 
@@ -60,6 +62,24 @@ type Store struct {
 	active atomic.Bool
 
 	session *storeSession
+}
+
+// storeSession keeps track of the lifetime of a Store instance.
+// In flight resource update operations do extend the lifetime of
+// a Store, even if the store has been closed by a go-routine.
+//
+// A session will shutdown when the Store is closed and all pending
+// update operations have been persisted. The session outlives the 'Store' in
+// the case that update operations are still pending when the store is closed.
+type storeSession struct {
+	refCount concert.RefCount
+
+	local  *shadowStore
+	global *registry.Store
+
+	// keep track of owner, so we can remove close the shared store once the last
+	// session goes away.
+	connector *Connector
 }
 
 // NewStore creates a new Store.
@@ -95,3 +115,23 @@ func (s *Store) isOpen() bool {
 func (s *Store) isClosed() bool {
 	return !s.isOpen()
 }
+
+func newSession(
+	connector *Connector,
+	global *registry.Store,
+	local *shadowStore,
+) *storeSession {
+	session := &storeSession{connector: connector, global: global, local: local}
+	session.refCount.Action = func(_ error) { session.Close() }
+	return session
+}
+
+func (s *storeSession) Close() {
+	s.connector.releaseStore(s.global, s.local)
+	s.local = nil
+	s.global = nil
+	s.connector = nil
+}
+
+func (s *storeSession) Retain()       { s.refCount.Retain() }
+func (s *storeSession) Release() bool { return s.refCount.Release() }
