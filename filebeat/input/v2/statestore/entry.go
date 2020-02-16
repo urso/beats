@@ -26,6 +26,12 @@ import (
 )
 
 // resourceEntry keeps track of actual resource locks and pending updates.
+//
+// Note: When locking the resource entry, we first want to lock the globalLock.
+//       The global lock keeps track of how many lock attempts we are running, and
+//       ensures that the global locks is not released early. When attempting to lock
+//       the resource, we need to check if the lock has already been lost by the
+//       active lock session of the global lock.
 type resourceEntry struct {
 	key        ResourceKey
 	refCount   concert.RefCount
@@ -40,27 +46,42 @@ type resourceEntry struct {
 // If `pending` is 0, then the state store and the persistent registry are in sync.
 // In this case `cached` will be nil and the registry is used for reading a value.
 type valueState struct {
-	mux     sync.Mutex
-	pending uint          // pending updates until value is in sync
-	cached  common.MapStr // current value if state == valueOutOfSync
+	mux sync.Mutex
+
+	// pending updates until value is in sync
+	pendingIgnore uint // ignore updates, because lock was lost
+	pendingGood   uint // lock still held
+
+	cached common.MapStr // current value if state == valueOutOfSync
 }
 
-func (r *resourceEntry) Lock() {
-	r.globalLock.Lock()
-	r.mu.Lock()
+func (r *resourceEntry) Lock() *unison.LockSession {
+	for {
+		session := r.globalLock.Lock()
+		err := r.mu.LockContext(channelCtx(session.Done()))
+		if err == nil {
+			return session
+		}
+	}
 }
 
-func (r *resourceEntry) TryLock() bool {
-	if !r.globalLock.TryLock() {
-		return false
+func (r *resourceEntry) TryLock() (*unison.LockSession, bool) {
+	session, ok := r.globalLock.TryLock()
+	if !ok {
+		return nil, false
 	}
 
 	if !r.mu.TryLock() {
 		r.globalLock.Unlock()
-		return false
+		return nil, false
 	}
 
-	return true
+	// we lost the managed lock in the meantime :(
+	if !sessionHoldsLock(session) {
+		r.mu.Unlock()
+		return nil, false
+	}
+	return session, true
 }
 
 func (r *resourceEntry) Unlock() {

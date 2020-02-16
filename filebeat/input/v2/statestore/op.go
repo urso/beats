@@ -21,30 +21,35 @@ import (
 	"runtime"
 
 	"github.com/elastic/beats/libbeat/registry"
+	"github.com/elastic/go-concert/unison"
 )
 
 // ResourceUpdateOp defers a state update to be written to the persistent store.
 // The operation can be applied to the registry using ApplyWith. Calling Close
 // will mark the operation as done.
 type ResourceUpdateOp struct {
-	session *storeSession
-	key     ResourceKey
-	entry   *resourceEntry
-	updates interface{}
-	applied bool
+	session     *storeSession
+	lockSession *unison.LockSession
+	entry       *resourceEntry
+	updates     interface{}
+	applied     bool
 }
 
-func newUpdateOp(session *storeSession, key ResourceKey, entry *resourceEntry, updates interface{}) *ResourceUpdateOp {
+func newUpdateOp(
+	session *storeSession,
+	lockSession *unison.LockSession,
+	entry *resourceEntry,
+	updates interface{},
+) *ResourceUpdateOp {
 	session.Retain()
 	entry.refCount.Retain()
 
 	op := &ResourceUpdateOp{
-		session: session,
-		key:     key,
-		entry:   entry,
-		updates: updates,
+		session:     session,
+		lockSession: lockSession,
+		entry:       entry,
+		updates:     updates,
 	}
-
 	runtime.SetFinalizer(op, (*ResourceUpdateOp).finalize)
 	return op
 }
@@ -54,9 +59,18 @@ func newUpdateOp(session *storeSession, key ResourceKey, entry *resourceEntry, u
 // the provided store.  If possible the helper should keep the transaction open
 // if an array of operations are applied.
 func (op *ResourceUpdateOp) ApplyWith(withTx func(*registry.Store, func(*registry.Tx) error) error) error {
+	val := &op.entry.value
+	val.mux.Lock()
+	ignore := val.pendingIgnore > 0
+	val.mux.Unlock()
+
+	if ignore || !sessionHoldsLock(op.lockSession) {
+		return nil
+	}
+
 	store := op.session.global
 	err := withTx(store, func(tx *registry.Tx) error {
-		return tx.Update(registry.Key(op.key), op.updates)
+		return tx.Update(registry.Key(op.entry.key), op.updates)
 	})
 	op.applied = true
 	return err
@@ -82,15 +96,23 @@ func (op *ResourceUpdateOp) finalize() {
 
 func (op *ResourceUpdateOp) closePending() {
 	entry := op.entry
+	val := &entry.value
 
-	entry.value.mux.Lock()
-	defer entry.value.mux.Unlock()
+	val.mux.Lock()
+	defer val.mux.Unlock()
 
-	invariant(entry.value.pending > 0, "there should be pending updates")
-	entry.value.pending--
-	if entry.value.pending == 0 {
+	pendingTotal := val.pendingGood + val.pendingIgnore
+	invariant(pendingTotal > 0, "there should be pending updates")
+
+	if val.pendingIgnore > 0 {
+		val.pendingIgnore--
+		return
+	}
+
+	val.pendingGood--
+	if val.pendingGood == 0 {
 		// we are in sync now, let's remove duplicate data from main memory.
-		entry.value.cached = nil
+		val.cached = nil
 	}
 }
 

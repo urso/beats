@@ -18,18 +18,33 @@
 package statestore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/elastic/go-concert/unison"
 )
 
 type lockMode int
+
+type channelCtx <-chan struct{}
 
 const (
 	lockRequired lockMode = iota
 	lockAlreadyTaken
 	lockMustRelease
 )
+
+func (ch channelCtx) Done() <-chan struct{} { return ch }
+func (ch channelCtx) Err() error {
+	select {
+	case <-ch:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
 
 func withLockMode(mux *sync.Mutex, lm lockMode, fn func() error) error {
 	switch lm {
@@ -63,5 +78,18 @@ func checkNotLocked(b bool) {
 func invariant(b bool, message string) {
 	if !b {
 		panic(errors.New(message))
+	}
+}
+
+func sessionHoldsLock(session *unison.LockSession) bool {
+	if session == nil {
+		return false
+	}
+
+	select {
+	case <-session.Done():
+		return false
+	default:
+		return true
 	}
 }

@@ -28,7 +28,8 @@ import (
 var (
 	// ErrClosed error code indicates that the operation can not
 	// be executed, because the store has been closed already.
-	ErrClosed = errors.New("store is closed")
+	ErrClosed         = errors.New("store is closed")
+	ErrLostGlobalLock = errors.New("lost global lock")
 )
 
 // Error provides a common error type used by the statestore package.  It

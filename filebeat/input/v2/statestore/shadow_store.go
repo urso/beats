@@ -53,28 +53,6 @@ type shadowStore struct {
 	resources    map[ResourceKey]*resourceEntry
 }
 
-// globalLockManager gives access to the LockManager. It ensures that the global lock is
-// locked for as long as any session holds the lock.
-type globalLockManager struct {
-	prefix  string
-	manager *unison.LockManager
-
-	mu     sync.Mutex
-	active map[string]*globalLock
-}
-
-// globalLock keeps track of lock/unlocks within shared sessions, ensuring that the managed lock
-// from the global LockManager is kept for as long as at least one entry in the StateStore
-// require the lock. The global lock will be freed after all session that do access the lock
-// have been finished.
-type globalLock struct {
-	name      string
-	lock      *unison.ManagedLock
-	mu        sync.Mutex
-	lockCount int
-	ref       concert.RefCount
-}
-
 func newShadowStore(name string, lockmngr *unison.LockManager) *shadowStore {
 	return &shadowStore{
 		name:         name,
@@ -135,117 +113,13 @@ func (s *shadowStore) remove(key ResourceKey, lm lockMode) {
 }
 
 func (s *shadowStore) createEntry(key ResourceKey) *resourceEntry {
+	entry := &resourceEntry{
+		key: key,
+		mu:  unison.MakeMutex(),
+	}
 	lock := s.locksManager.Access(string(key))
-	return &resourceEntry{
-		key:        key,
-		mu:         unison.MakeMutex(),
-		globalLock: lock,
-	}
-}
+	entry.globalLock = lock
+	lock.entry = entry
 
-func newGlobalLockManager(name string, lockmngr *unison.LockManager) *globalLockManager {
-	return &globalLockManager{
-		prefix:  name,
-		manager: lockmngr,
-		active:  map[string]*globalLock{},
-	}
-}
-
-func (glm *globalLockManager) Close() {
-	invariant(len(glm.active) == 0, "did expect that all locks have been released")
-	glm.manager = nil
-}
-
-func (glm *globalLockManager) Access(key string) *globalLock {
-	if glm.prefix != "" {
-		key = glm.prefix + "/" + key
-	}
-
-	glm.mu.Lock()
-	defer glm.mu.Unlock()
-
-	if lock, exist := glm.active[key]; exist {
-		lock.ref.Retain()
-		return lock
-	}
-
-	lock := newGlobalLock(key, glm.manager.Access(key))
-	glm.active[key] = lock
-	return lock
-}
-
-func (glm *globalLockManager) releaseLock(l *globalLock) {
-	glm.mu.Lock()
-	defer glm.mu.Unlock()
-
-	if l.ref.Release() {
-		if l.lockCount > 0 {
-			l.lock.Unlock()
-		}
-
-		delete(glm.active, l.name)
-	}
-}
-
-func newGlobalLock(name string, lock *unison.ManagedLock) *globalLock {
-	return &globalLock{name: name, lock: lock}
-}
-
-func (l *globalLock) Lock() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.lockCount > 0 {
-		l.lockCount++
-		return
-	}
-
-	l.lock.Lock(l.lockCallbackOpt())
-	l.onLockAcquired()
-	l.lockCount++
-}
-
-func (l *globalLock) TryLock() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.lockCount > 0 {
-		l.lockCount++
-		return true
-	}
-
-	_, success := l.lock.TryLock(l.lockCallbackOpt())
-	if success {
-		l.lockCount++
-		l.onLockAcquired()
-	}
-	return success
-}
-
-func (l *globalLock) Unlock() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	invariant(l.lockCount > 0, "attempting to unlock unlocked global store lock")
-
-	l.lockCount--
-	if l.lockCount == 0 {
-		l.lock.Unlock()
-	}
-}
-
-func (l *globalLock) lockCallbackOpt() unison.LockOption {
-	return unison.WithSignalCallbacks{
-		Lost:     l.onLockLost,
-		Unlocked: l.onLockUnlocked,
-	}
-}
-
-func (l *globalLock) onLockAcquired() {
-}
-
-func (l *globalLock) onLockLost() {
-}
-
-func (l *globalLock) onLockUnlocked() {
+	return entry
 }
