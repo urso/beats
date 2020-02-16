@@ -200,7 +200,8 @@ func (l *globalLock) Lock() {
 		return
 	}
 
-	l.lock.Lock()
+	l.lock.Lock(l.lockCallbackOpt())
+	l.onLockAcquired()
 	l.lockCount++
 }
 
@@ -209,12 +210,14 @@ func (l *globalLock) TryLock() bool {
 	defer l.mu.Unlock()
 
 	if l.lockCount > 0 {
+		l.lockCount++
 		return true
 	}
 
-	success := l.lock.TryLock()
+	_, success := l.lock.TryLock(l.lockCallbackOpt())
 	if success {
 		l.lockCount++
+		l.onLockAcquired()
 	}
 	return success
 }
@@ -229,4 +232,20 @@ func (l *globalLock) Unlock() {
 	if l.lockCount == 0 {
 		l.lock.Unlock()
 	}
+}
+
+func (l *globalLock) lockCallbackOpt() unison.LockOption {
+	return unison.WithSignalCallbacks{
+		Lost:     l.onLockLost,
+		Unlocked: l.onLockUnlocked,
+	}
+}
+
+func (l *globalLock) onLockAcquired() {
+}
+
+func (l *globalLock) onLockLost() {
+}
+
+func (l *globalLock) onLockUnlocked() {
 }

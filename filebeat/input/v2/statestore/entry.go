@@ -66,6 +66,5 @@ func (r *resourceEntry) TryLock() bool {
 func (r *resourceEntry) Unlock() {
 	// Unlock can panic -> ensure we always run globalLock.Unlock()
 	defer r.globalLock.Unlock()
-
 	r.mu.Unlock()
 }
