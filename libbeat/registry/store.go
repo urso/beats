@@ -43,6 +43,11 @@ type Store struct {
 	activeTx sync.WaitGroup // active transaction
 }
 
+type doneContext interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
 func newSharedStore(reg *Registry, name string, backend backend.Store) *sharedStore {
 	return &sharedStore{
 		reg:      reg,
@@ -99,6 +104,13 @@ func (s *Store) Begin(readonly bool) (*Tx, error) {
 // rolled back if fn panics or returns an error.
 // The transaction will be comitted if fn returns without error.
 func (s *Store) Update(fn func(tx *Tx) error) error {
+	return s.UpdateContext(nil, fn)
+}
+
+// UpdateContext runs fn within a writable transaction. The transaction will be
+// rolled back at the and if fn panics, returns and error, or if the context was cancelled.
+// The transaction will be comitted if fn returns without error and the context is still active.
+func (s *Store) UpdateContext(ctx doneContext, fn func(tx *Tx) error) error {
 	tx, err := s.Begin(false)
 	if err != nil {
 		return err
@@ -109,7 +121,18 @@ func (s *Store) Update(fn func(tx *Tx) error) error {
 		tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+
+	if ctx == nil {
+		return tx.Commit()
+	}
+
+	select {
+	case <-ctx.Done():
+		tx.Rollback()
+		return ctx.Err()
+	default:
+		return tx.Commit()
+	}
 }
 
 // View executes a readonly transaction. An error is return if the readonly
