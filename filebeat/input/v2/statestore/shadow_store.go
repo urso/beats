@@ -62,7 +62,6 @@ func newShadowStore(name string, lockmngr *unison.LockManager) *shadowStore {
 }
 
 func (s *shadowStore) close() error {
-	s.locksManager.Close()
 	return nil
 }
 

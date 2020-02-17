@@ -29,9 +29,6 @@ import (
 type globalLockManager struct {
 	prefix  string
 	manager *unison.LockManager
-
-	mu     sync.Mutex
-	active map[string]*globalLock
 }
 
 // globalLock keeps track of lock/unlocks within shared sessions, ensuring that the managed lock
@@ -44,7 +41,6 @@ type globalLock struct {
 	session   *unison.LockSession
 	mu        sync.Mutex
 	lockCount int
-	ref       concert.RefCount
 }
 
 type shadowLockSession struct {
@@ -57,44 +53,14 @@ func newGlobalLockManager(name string, lockmngr *unison.LockManager) *globalLock
 	return &globalLockManager{
 		prefix:  name,
 		manager: lockmngr,
-		active:  map[string]*globalLock{},
 	}
-}
-
-func (glm *globalLockManager) Close() {
-	invariant(len(glm.active) == 0, "did expect that all locks have been released")
-	glm.manager = nil
 }
 
 func (glm *globalLockManager) Access(key string) *globalLock {
 	if glm.prefix != "" {
 		key = glm.prefix + "/" + key
 	}
-
-	glm.mu.Lock()
-	defer glm.mu.Unlock()
-
-	if lock, exist := glm.active[key]; exist {
-		lock.ref.Retain()
-		return lock
-	}
-
-	lock := newGlobalLock(glm.manager.Access(key))
-	glm.active[key] = lock
-	return lock
-}
-
-func (glm *globalLockManager) releaseLock(l *globalLock) {
-	glm.mu.Lock()
-	defer glm.mu.Unlock()
-
-	if l.ref.Release() {
-		if l.lockCount > 0 {
-			l.lock.Unlock()
-		}
-
-		delete(glm.active, l.lock.Key())
-	}
+	return newGlobalLock(glm.manager.Access(key))
 }
 
 func newGlobalLock(lock *unison.ManagedLock) *globalLock {
