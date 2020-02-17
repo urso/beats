@@ -39,6 +39,19 @@
 // updates might still be applied to the registry file, while the new
 // go-routine can start creating new update operations concurrently to be
 // applied to after already pending updates.
+//
+// The store holds on a lock acquired from the lock manager for as long as
+// the resource and resource update operations are still in use. The lock provided
+// by the lock manager can get lost at anytime. In this case resources and
+// resource update operations are invalidated. All pending updates will be
+// lost, and users of the statestore should re-acquire the lock and read the
+// last known state from the regsitry again.
+// The LockSession returned by a Resource can be used to check for lock state changes.
+// One can combine a `context.Context` and signaling from a locksession via
+// `ctxtool.WithChannel`, in order to cancel operations that require a context.
+//
+// Note: loosing a lock can lead to duplicates, in case the corresponding event
+//       has been acked before the state could have been persisted.
 package statestore
 
 import (
@@ -50,14 +63,17 @@ import (
 // ResourceKey is used to describe an unique resource to be stored in the registry.
 type ResourceKey string
 
-// Store provides some coordinates access to a registry.Store.
-// All update and read operations require users to acquire a resource first.
-// A Resource must be locked before it can be modified. This ensures that at most
-// one go-routine has access to a resource. Lock/TryLock/Unlock can be used to
+// Store provides coordinated access to a registry.Store. All update and
+// read operations require users to acquire a resource first. A Resource must
+// be locked before it can be modified. This ensures that at most one
+// go-routine has access to a resource. Lock/TryLock/Unlock can be used to
 // coordinate resource access even between independent components.
 //
-// Updates in the shared store can be ahead of the globalStore. Updates will be eventually synchronised to the global store
-// via update operations that are finally executed. Locks already released on the shared store are not yet released in the global store,
+// Updates in the shared store can be ahead of the globalStore. Updates will be
+// eventually synchronised to the global store via update operations that are
+// finally executed. Locks already released on the shared store are not yet
+// released in the global store, but if the global lock is lost early, then all
+// pending update operations are cancelled.
 type Store struct {
 	active atomic.Bool
 
@@ -94,7 +110,7 @@ func newStore(session *storeSession) *Store {
 
 // Close deactivates the store and waits for all resources to be released.
 // Resources can not be accessed anymore, but in progress resource updates are
-// still active, until they are eventually ACKed.  The underlying persistent
+// still active, until they are eventually ACKed. The underlying persistent
 // store will be finally closed once all pending updates have been written to
 // the persistent store.
 func (s *Store) Close() {

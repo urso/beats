@@ -22,8 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"github.com/elastic/go-concert/unison"
 )
 
 type lockMode int
@@ -61,6 +59,15 @@ func withLockMode(mux *sync.Mutex, lm lockMode, fn func() error) error {
 	return fn()
 }
 
+func signalTriggered(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
 func ifNotOK(b *bool, fn func()) {
 	if !(*b) {
 		fn()
@@ -78,18 +85,5 @@ func checkNotLocked(b bool) {
 func invariant(b bool, message string) {
 	if !b {
 		panic(errors.New(message))
-	}
-}
-
-func sessionHoldsLock(session *unison.LockSession) bool {
-	if session == nil {
-		return false
-	}
-
-	select {
-	case <-session.Done():
-		return false
-	default:
-		return true
 	}
 }

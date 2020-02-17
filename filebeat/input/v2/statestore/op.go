@@ -27,6 +27,10 @@ import (
 // ResourceUpdateOp defers a state update to be written to the persistent store.
 // The operation can be applied to the registry using ApplyWith. Calling Close
 // will mark the operation as done.
+//
+// The update operation is invalidated if the global lock on the corresponding
+// resource has been lost. Independent of the lock state, the update operation
+// must be closed always when we are done.
 type ResourceUpdateOp struct {
 	session     *storeSession
 	lockSession *unison.LockSession
@@ -64,7 +68,7 @@ func (op *ResourceUpdateOp) ApplyWith(withTx func(*registry.Store, func(*registr
 	ignore := val.pendingIgnore > 0
 	val.mux.Unlock()
 
-	if ignore || !sessionHoldsLock(op.lockSession) {
+	if ignore || signalTriggered(op.lockSession.Done()) {
 		return nil
 	}
 
@@ -84,6 +88,8 @@ func (op *ResourceUpdateOp) Close() {
 	op.finalize()
 }
 
+// finalize is registered with the runtime GC, to ensure that we are at least
+// releasing pending update operations.
 func (op *ResourceUpdateOp) finalize() {
 	if !op.applied {
 		panic("unapplied resource update detected")

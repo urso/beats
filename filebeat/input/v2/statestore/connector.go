@@ -37,6 +37,9 @@ type Connector struct {
 }
 
 // NewConnector creates a new store connector for accessing a resource Store.
+// The lock manager is used to coordinate access to keys in the registry. The
+// locks held via the lock manager are only released if all resources and
+// pending update operations have been finished.
 func NewConnector(
 	log *logp.Logger,
 	lockmngr *unison.LockManager,

@@ -29,14 +29,17 @@ import (
 // store.
 // A resource must not be used anymore once the store has been closed.
 type Resource struct {
-	store       *Store
-	isLocked    bool
-	lockSession *unison.LockSession
+	store             *Store
+	localLockSession  *shadowLockSession
+	globalLockSession *unison.LockSession
 
 	key   ResourceKey
 	entry *resourceEntry
 }
 
+// LockSession is returned by the lock methods of Resource. The LockSession can
+// be used to listen for locking state changes of the resource. The
+// LockSession becomes invalid after the Resouce has been unlocked.
 type LockSession interface {
 	Done() <-chan struct{}
 	Unlocked() <-chan struct{}
@@ -45,9 +48,8 @@ type LockSession interface {
 
 func newResource(store *Store, key ResourceKey) *Resource {
 	res := &Resource{
-		store:    store,
-		isLocked: false,
-		key:      key,
+		store: store,
+		key:   key,
 	}
 
 	// in case we miss an unlock operation (programmer error or panic that hash
@@ -105,29 +107,37 @@ func (r *Resource) unlink() {
 
 // Lock locks a resource held by the store. It blocks until the lock becomes
 // available.
+// Lock returns a lock session, that is valid until the Resource has been unlocked.
+// The lock session can be used to listen for lock state changes.
 func (r *Resource) Lock() LockSession {
 	checkNotLocked(r.IsLocked())
 
 	r.link(true)
-	r.lockSession = r.entry.Lock()
-	r.isLocked = true
-	return r.lockSession
+	sessions := r.entry.Lock()
+	r.localLockSession, r.globalLockSession = sessions.local, sessions.global
+	return r.localLockSession
 }
 
 // TryLock attempts to lock the resource. It returns true if the lock has been
 // acquired successfully.
+// TryLock returns a lock session, that is valid until the Resource has been unlocked.
+// The lock session can be used to listen for lock state changes.
 func (r *Resource) TryLock() (LockSession, bool) {
 	checkNotLocked(r.IsLocked())
 
 	r.link(true)
-	r.lockSession, r.isLocked = r.entry.TryLock()
-	if !r.isLocked {
+	sessions, isLocked := r.entry.TryLock()
+	if !isLocked {
 		r.unlink()
+		return nil, false
 	}
-	return r.lockSession, r.isLocked
+
+	r.localLockSession, r.globalLockSession = sessions.local, sessions.global
+	return r.localLockSession, true
 }
 
 // Unlock releases a resource.
+// The Unlocked and Done signals on the active LockSession will be triggered.
 func (r *Resource) Unlock() {
 	checkLocked(r.IsLocked())
 
@@ -137,21 +147,15 @@ func (r *Resource) Unlock() {
 
 func (r *Resource) doUnlock() {
 	r.entry.Unlock()
-	r.markUnlocked()
+	r.localLockSession = nil
+	r.globalLockSession = nil
 }
 
 // IsLocked checks if the resource currently holds the lock to the shared
 // registry entry.
 func (r *Resource) IsLocked() bool {
-	return r.isLocked
-}
-
-func (r *Resource) markLocked() {
-	r.isLocked = true
-}
-
-func (r *Resource) markUnlocked() {
-	r.isLocked = false
+	session := r.localLockSession
+	return session != nil && !signalTriggered(session.Done())
 }
 
 // Has checks if resource is already in registry.
@@ -195,6 +199,8 @@ func (r *Resource) Has() (bool, error) {
 // The update call is thread-safe, as the update operation itself is protected.
 // But data races are still possible, if any two go-routines update
 // an overlapping set of fields.
+//
+// Update fails if the Lock has been lost, or if the registry report a problem.
 func (r *Resource) Update(delta interface{}) error {
 	const op = "resource/update"
 
@@ -205,7 +211,7 @@ func (r *Resource) Update(delta interface{}) error {
 	checkLocked(r.IsLocked())
 
 	// we can only update if we still hold the global lock session
-	if !sessionHoldsLock(r.lockSession) {
+	if signalTriggered(r.localLockSession.Done()) {
 		return &Error{op: op, message: "can not update resource", cause: ErrLostGlobalLock}
 	}
 
@@ -222,7 +228,7 @@ func (r *Resource) Update(delta interface{}) error {
 		}
 	}
 
-	cancelCtx := channelCtx(r.lockSession.Done())
+	cancelCtx := channelCtx(r.localLockSession.Done())
 	err := r.store.session.global.UpdateContext(cancelCtx, func(tx *registry.Tx) error {
 		return tx.Update(registry.Key(r.key), delta)
 	})
@@ -305,7 +311,7 @@ func (r *Resource) UpdateOp(delta interface{}) (*ResourceUpdateOp, error) {
 	invariant(entry != nil, "in memory state is not linked to the resource")
 	val := &entry.value
 
-	if !sessionHoldsLock(r.lockSession) {
+	if signalTriggered(r.localLockSession.Done()) {
 		return nil, ErrLostGlobalLock
 	}
 
@@ -332,5 +338,5 @@ func (r *Resource) UpdateOp(delta interface{}) (*ResourceUpdateOp, error) {
 	}
 
 	entry.value.pendingGood++
-	return newUpdateOp(r.store.session, r.lockSession, entry, delta), nil
+	return newUpdateOp(r.store.session, r.globalLockSession, entry, delta), nil
 }

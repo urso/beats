@@ -47,6 +47,12 @@ type globalLock struct {
 	ref       concert.RefCount
 }
 
+type shadowLockSession struct {
+	done     *concert.OnceSignaler
+	unlocked *concert.OnceSignaler
+	lockLost *concert.OnceSignaler
+}
+
 func newGlobalLockManager(name string, lockmngr *unison.LockManager) *globalLockManager {
 	return &globalLockManager{
 		prefix:  name,
@@ -144,6 +150,7 @@ func (l *globalLock) Unlock() {
 func (l *globalLock) lockCallbackOpt() unison.LockOption {
 	return unison.WithSignalCallbacks{
 		Done: l.onLockDone,
+		Lost: l.onLockLost,
 	}
 }
 
@@ -162,4 +169,35 @@ func (l *globalLock) onLockDone() {
 	val.pendingIgnore += val.pendingGood
 	val.pendingGood = 0
 	val.cached = nil
+}
+
+func (l *globalLock) onLockLost() {
+	entry := l.entry
+	entry.muInternal.Lock()
+	defer entry.muInternal.Unlock()
+	if entry.lockSession != nil {
+		entry.lockSession.signalLost()
+	}
+}
+
+func newShadowLockSession() *shadowLockSession {
+	return &shadowLockSession{
+		done:     concert.NewOnceSignaler(),
+		unlocked: concert.NewOnceSignaler(),
+		lockLost: concert.NewOnceSignaler(),
+	}
+}
+
+func (s *shadowLockSession) Done() <-chan struct{}     { return s.done.Done() }
+func (s *shadowLockSession) Unlocked() <-chan struct{} { return s.unlocked.Done() }
+func (s *shadowLockSession) LockLost() <-chan struct{} { return s.lockLost.Done() }
+
+func (s *shadowLockSession) signalUnlocked() {
+	s.unlocked.Trigger()
+	s.done.Trigger()
+}
+
+func (s *shadowLockSession) signalLost() {
+	s.lockLost.Trigger()
+	s.done.Trigger()
 }

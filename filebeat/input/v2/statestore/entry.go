@@ -29,15 +29,28 @@ import (
 //
 // Note: When locking the resource entry, we first want to lock the globalLock.
 //       The global lock keeps track of how many lock attempts we are running, and
-//       ensures that the global locks is not released early. When attempting to lock
+//       ensures that the global lock is not released early. When attempting to lock
 //       the resource, we need to check if the lock has already been lost by the
 //       active lock session of the global lock.
 type resourceEntry struct {
-	key        ResourceKey
-	refCount   concert.RefCount
-	globalLock *globalLock
-	mu         unison.Mutex
-	value      valueState
+	key      ResourceKey
+	refCount concert.RefCount
+
+	// locking primitives
+	globalLock *globalLock  // global lock synchronising access to the LockManager and Registry
+	mu         unison.Mutex // local lock to synchonise access to the shadow store
+
+	// internal accounting
+	muInternal  sync.Mutex
+	lockSession *shadowLockSession
+
+	// value keeps track of pending updates
+	value valueState
+}
+
+type entryLockSessions struct {
+	global *unison.LockSession
+	local  *shadowLockSession
 }
 
 // valueState keeps track of pending updates to a value.
@@ -52,40 +65,71 @@ type valueState struct {
 	pendingIgnore uint // ignore updates, because lock was lost
 	pendingGood   uint // lock still held
 
-	cached common.MapStr // current value if state == valueOutOfSync
+	// current value if the store is ahead of the reigstry (pending update operations).
+	cached common.MapStr
 }
 
-func (r *resourceEntry) Lock() *unison.LockSession {
+func (r *resourceEntry) Lock() entryLockSessions {
 	for {
 		session := r.globalLock.Lock()
-		err := r.mu.LockContext(channelCtx(session.Done()))
+
+		var err error
+		var localSession *shadowLockSession
+		func() {
+			r.muInternal.Lock()
+			defer r.muInternal.Unlock()
+			err = r.mu.LockContext(channelCtx(session.Done()))
+			if err == nil {
+				localSession = newShadowLockSession()
+				r.lockSession = localSession
+			}
+		}()
 		if err == nil {
-			return session
+			return entryLockSessions{
+				global: session,
+				local:  localSession,
+			}
 		}
 	}
 }
 
-func (r *resourceEntry) TryLock() (*unison.LockSession, bool) {
+func (r *resourceEntry) TryLock() (entryLockSessions, bool) {
 	session, ok := r.globalLock.TryLock()
 	if !ok {
-		return nil, false
+		return entryLockSessions{}, false
 	}
 
 	if !r.mu.TryLock() {
 		r.globalLock.Unlock()
-		return nil, false
+		return entryLockSessions{}, false
 	}
 
-	// we lost the managed lock in the meantime :(
-	if !sessionHoldsLock(session) {
+	r.muInternal.Lock()
+	defer r.muInternal.Unlock()
+
+	if signalTriggered(session.Done()) {
 		r.mu.Unlock()
-		return nil, false
+		return entryLockSessions{}, false
 	}
-	return session, true
+
+	r.lockSession = newShadowLockSession()
+
+	return entryLockSessions{
+		global: session,
+		local:  r.lockSession,
+	}, true
 }
 
 func (r *resourceEntry) Unlock() {
+	r.muInternal.Lock()
+	session := r.lockSession
+	r.lockSession = nil
+	r.muInternal.Unlock()
+
 	// Unlock can panic -> ensure we always run globalLock.Unlock()
 	defer r.globalLock.Unlock()
 	r.mu.Unlock()
+	if session != nil {
+		session.signalUnlocked()
+	}
 }
