@@ -38,8 +38,8 @@ func RunnerFactory(
 	return &factory{log: log, info: info, loader: loader}
 }
 
-func (f *factory) CheckConfig(config *common.Config) error {
-	_, err := f.loader.Configure(c)
+func (f *factory) CheckConfig(cfg *common.Config) error {
+	_, err := f.loader.Configure(cfg)
 	if err != nil {
 		return err
 	}

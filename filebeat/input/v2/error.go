@@ -30,6 +30,14 @@ type LoaderError struct {
 // or because the type is unknown.
 var ErrUnknown = errors.New("unknown input type")
 
+// ErrNoInputConfigured indicates that the 'type' setting is missing.
+var ErrNoInputConfigured = errors.New("no input type configured")
+
+// ErrInfiniteLoadLoop is reported by loaders supporting recursive input
+// configurations (inputs referencing other inputs). The error indicates
+// that the loader has detected a loop that most not be.
+var ErrInfiniteLoadLoop = errors.New("infinite load loop detected")
+
 // IsUnknownInputError checks if an error value indicates an input load
 // error because there is no existing plugin that can create the input.
 func IsUnknownInputError(err error) bool { return sderr.Is(err, ErrUnknown) }
