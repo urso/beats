@@ -55,6 +55,10 @@ var ErrNoInputConfigured = errors.New("no input type configured")
 // that the loader has detected a loop that most not be.
 var ErrInfiniteLoadLoop = errors.New("infinite load loop detected")
 
+// ErrPluginWithoutName reports that the operation failed because
+// the plugin is required to have a Name.
+var ErrPluginWithoutName = errors.New("the plugin has no name")
+
 // IsUnknownInputError checks if an error value indicates an input load
 // error because there is no existing plugin that can create the input.
 func IsUnknownInputError(err error) bool { return sderr.Is(err, ErrUnknown) }
