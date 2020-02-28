@@ -44,12 +44,18 @@ type LoaderList []Loader
 // used for table lookup. The rest will be passed to the found loader.
 // If the 'type' name does not have a prefix, the loader table will use the
 // loader registered with the empty string.
-type LoaderTable map[string]Loader
+type LoaderTable struct {
+	typeField string
+	table     map[string]Loader
+}
 
 // ConfigsLoader uses a transformer to generate the final configuration to be passed to a loader.
 // The transformer can generate multiple configurations. An input for each configuration will be generated.
 // The generated inputs will be combined into one common input that runs the given inputs concurrently.
 type ConfigsLoader struct {
+	// The field that will be used to select the type from the configuration.
+	TypeField string
+
 	// Transform transforms the configuration into a set of input configurations.
 	// Each configuration will be passed to the given loader.
 	Transform ConfigTransformer
@@ -73,7 +79,7 @@ type ConfigTransformer interface {
 }
 
 var _ Loader = (LoaderList)(nil)
-var _ Loader = (LoaderTable)(nil)
+var _ Loader = (*LoaderTable)(nil)
 var _ Loader = (*ConfigsLoader)(nil)
 
 // Add adds another loader to the list.
@@ -108,22 +114,34 @@ func (l LoaderList) Configure(cfg *common.Config) (Input, error) {
 	return lastInput, lastErr
 }
 
+// NewLoaderTable creates a new LoaderTable, that will select loaders based on the typeField.
+func NewLoaderTable(typeField string, optLoaders map[string]Loader) *LoaderTable {
+	t := &LoaderTable{
+		typeField: typeField,
+		table:     make(map[string]Loader, len(optLoaders)),
+	}
+	for name, l := range optLoaders {
+		t.table[name] = l
+	}
+	return t
+}
+
 // Add adds another loader to the table. The default loader can be set by passing an empty string.
 // Add returns an error if the name is already in use.
-func (t LoaderTable) Add(name string, l Loader) error {
-	if _, exists := t[name]; exists {
+func (t *LoaderTable) Add(name string, l Loader) error {
+	if _, exists := t.table[name]; exists {
 		return fmt.Errorf("loader name '%v' already registered", l)
 	}
 
-	t[name] = l
+	t.table[name] = l
 	return nil
 }
 
 // Configure loads an input by looking up the loader in the table. The 'type'
 // name is split by '/'.  If the type has no '/', then we fallback to the
 // loader registered with "".
-func (t LoaderTable) Configure(cfg *common.Config) (Input, error) {
-	fullName, err := getTypeName(cfg)
+func (t *LoaderTable) Configure(cfg *common.Config) (Input, error) {
+	fullName, err := getTypeName(cfg, t.typeField)
 	if err != nil {
 		return Input{}, err
 	}
@@ -136,7 +154,7 @@ func (t LoaderTable) Configure(cfg *common.Config) (Input, error) {
 		typeName = typeName[idx+1:]
 	}
 
-	loader := t[key]
+	loader := t.table[key]
 	if loader == nil {
 		return Input{}, &LoaderError{
 			Name:    fullName,
@@ -161,12 +179,17 @@ func (cl *ConfigsLoader) Configure(cfg *common.Config) (Input, error) {
 		panic("invalid configs loader")
 	}
 
-	inputs, err := cl.load(nil, cfg)
+	fieldName := cl.TypeField
+	if fieldName == "" {
+		fieldName = "type"
+	}
+
+	inputs, err := cl.load(fieldName, nil, cfg)
 	if err != nil {
 		return Input{}, err
 	}
 
-	inputName, _ := getTypeName(cfg)
+	inputName, _ := getTypeName(cfg, fieldName)
 	if len(inputs) == 1 {
 		input := inputs[0]
 		input.Name = inputName
@@ -201,8 +224,12 @@ func (cl *ConfigsLoader) Configure(cfg *common.Config) (Input, error) {
 	}, nil
 }
 
-func (cl *ConfigsLoader) load(visited []string, cfg *common.Config) ([]Input, error) {
-	inputName, err := getTypeName(cfg)
+func (cl *ConfigsLoader) load(
+	fieldName string,
+	visited []string,
+	cfg *common.Config,
+) ([]Input, error) {
+	inputName, err := getTypeName(cfg, fieldName)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +243,7 @@ func (cl *ConfigsLoader) load(visited []string, cfg *common.Config) ([]Input, er
 			}
 			return cl.loadInput(cfg)
 		}
-		return cl.loadChildren(visited, inputName, cfg)
+		return cl.loadChildren(fieldName, visited, inputName, cfg)
 	}
 
 	if !cl.Recusrive {
@@ -230,7 +257,7 @@ func (cl *ConfigsLoader) load(visited []string, cfg *common.Config) ([]Input, er
 	if !cl.Transform.Has(inputName) {
 		return cl.loadInput(cfg)
 	}
-	return cl.loadChildren(visited, inputName, cfg)
+	return cl.loadChildren(fieldName, visited, inputName, cfg)
 }
 
 func (cl *ConfigsLoader) loadInput(cfg *common.Config) ([]Input, error) {
@@ -241,7 +268,12 @@ func (cl *ConfigsLoader) loadInput(cfg *common.Config) ([]Input, error) {
 	return []Input{input}, err
 }
 
-func (cl *ConfigsLoader) loadChildren(visited []string, name string, cfg *common.Config) ([]Input, error) {
+func (cl *ConfigsLoader) loadChildren(
+	fieldName string,
+	visited []string,
+	name string,
+	cfg *common.Config,
+) ([]Input, error) {
 	cfgs, err := cl.Transform.Transform(cfg)
 	if err != nil {
 		return nil, err
@@ -250,7 +282,7 @@ func (cl *ConfigsLoader) loadChildren(visited []string, name string, cfg *common
 	var inputs []Input
 	visited = append(visited, name)
 	for _, childCfg := range cfgs {
-		childInputs, err := cl.load(visited, childCfg)
+		childInputs, err := cl.load(fieldName, visited, childCfg)
 		if err != nil {
 			return nil, &LoaderError{
 				Name:    name,
@@ -280,12 +312,6 @@ func mergeLoadError(err1, err2 error) error {
 	return err2
 }
 
-func getTypeName(cfg *common.Config) (string, error) {
-	typeCfg := struct {
-		Type string
-	}{}
-	if err := cfg.Unpack(&typeCfg); err != nil {
-		return "", err
-	}
-	return typeCfg.Type, nil
+func getTypeName(cfg *common.Config, field string) (string, error) {
+	return cfg.String(field, -1)
 }
