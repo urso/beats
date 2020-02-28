@@ -18,11 +18,14 @@
 package v2
 
 import (
-	"context"
-
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
+	"context"
+
+	"github.com/elastic/beats/libbeat/beat"
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/logp"
 )
 
 // Input is a configured input object that can be used to probe or start
@@ -60,18 +63,4 @@ type TestContext struct {
 type Canceler interface {
 	Done() <-chan struct{}
 	Err() error
-}
-
-type cancelChan <-chan struct{}
-
-// ChanCanceler wraps a channerl into a Canceler.
-func ChanCanceler(ch <-chan struct{}) Canceler { return cancelChan(ch) }
-func (ch cancelChan) Done() <-chan struct{}    { return ch }
-func (ch cancelChan) Err() error {
-	select {
-	case <-ch:
-		return context.Canceled
-	default:
-		return nil
-	}
 }
