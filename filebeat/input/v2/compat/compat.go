@@ -2,14 +2,14 @@ package compat
 
 import (
 	"sync"
-
-	"github.com/cloudflare/cfssl/log"
-	v2 "github.com/elastic/beats/filebeat/input/v2"
-	"github.com/elastic/beats/libbeat/beat"
-	"github.com/elastic/beats/libbeat/cfgfile"
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/logp"
+	
 	"github.com/elastic/go-concert"
+
+	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/libbeat/beat"
+	"github.com/elastic/beats/v7/libbeat/cfgfile"
+	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
 type factory struct {
@@ -88,7 +88,7 @@ func (r *runner) Start() {
 	}.Create()
 
 	go func() {
-		r.log.Infof("Input %v starting", name)
+		log.Infof("Input %v starting", name)
 		err := r.input.Run(
 			v2.Context{
 				ID:          "", // TODO: hmmm....
@@ -101,7 +101,7 @@ func (r *runner) Start() {
 			r.connector,
 		)
 		if err != nil {
-			r.log.Errorf("Input '%v' failed with: %+v", name, err)
+			log.Errorf("Input '%v' failed with: %+v", name, err)
 		}
 	}()
 }

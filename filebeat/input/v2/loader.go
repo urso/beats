@@ -1,6 +1,6 @@
 package v2
 
-import "github.com/elastic/beats/libbeat/common"
+import "github.com/elastic/beats/v7/libbeat/common"
 
 // Loader is used to create an Input instance. The input created
 // only represents a configured object. The input MUST NOT start any
