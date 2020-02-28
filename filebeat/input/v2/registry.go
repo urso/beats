@@ -35,6 +35,14 @@ type Registry interface {
 // RegistryList combines a list of registries into one registry.
 type RegistryList []Registry
 
+// RegistryTree combines multiple registries into a tree.  Registry should not
+// be used directly, but can be used as a building block for creating specific
+// registries that can accept registries of it's own kind of plugins.
+type RegistryTree struct {
+	plugins    map[string]Plugin
+	registries []Registry
+}
+
 // Plugin to be stored in a registry. The plugin reports
 // common per plugin details and is used by a loader to create an input.
 type Plugin interface {
@@ -42,13 +50,15 @@ type Plugin interface {
 }
 
 var _ Registry = (RegistryList)(nil)
+var _ Registry = (*RegistryTree)(nil)
 
 // Add adds another registry to the list.
 func (l *RegistryList) Add(reg Registry) {
 	*l = append(*l, reg)
 }
 
-// Validate checks if the registry is valid and does not contain duplicate entries after merging.
+// Validate checks if the registry is valid and does not contain duplicate
+// entries after merging.
 func (l RegistryList) Validate() error {
 	seen := common.StringSet{}
 	dups := map[string]int{}
@@ -102,4 +112,81 @@ func (l RegistryList) Each(fn func(Plugin) bool) {
 	for _, reg := range l {
 		reg.Each(fn)
 	}
+}
+
+// AddPlugin adds another Plugin to the current node in the tree.
+func (r *RegistryTree) AddPlugin(p Plugin) error {
+	name := p.Details().Name
+	if name == "" {
+		return ErrPluginWithoutName
+	}
+
+	if _, exists := r.Find(name); exists {
+		return fmt.Errorf("conflicts with existing '%v' plugin", name)
+	}
+
+	if r.plugins == nil {
+		r.plugins = map[string]Plugin{}
+	}
+	r.plugins[name] = p
+	return nil
+}
+
+// AddRegistry adds a new child node to the current node in the tree.
+// It checks that no plugin in r have duplicate names with any plugins
+// current accessible.
+func (r *RegistryTree) AddRegistry(child Registry) error {
+	// check my plugins don't exist already
+	var err error
+	child.Each(func(p Plugin) bool {
+		name := p.Details().Name
+		_, exists := r.Find(name)
+		if exists {
+			err = fmt.Errorf("conflicts with existing '%v' plugin", name)
+		}
+		return !exists
+	})
+	if err != nil {
+		return err
+	}
+
+	r.registries = append(r.registries)
+	return nil
+}
+
+// Each iterates over all known plugins accessible using this registry.
+// The iteration stops when fn return false.
+func (r *RegistryTree) Each(fn func(Plugin) bool) {
+	var done bool
+	for _, reg := range r.registries {
+		if done {
+			return
+		}
+
+		reg.Each(func(p Plugin) bool {
+			done = fn(p)
+			return done
+		})
+	}
+
+	for _, p := range r.plugins {
+		if done {
+			return
+		}
+		done = fn(p)
+	}
+}
+
+// Find returns a Plugin based on it's name.
+func (r *RegistryTree) Find(name string) (Plugin, bool) {
+	if p, ok := r.plugins[name]; ok {
+		return p, true
+	}
+
+	for _, reg := range r.registries {
+		if p, ok := reg.Find(name); ok {
+			return p, ok
+		}
+	}
+	return nil, false
 }
