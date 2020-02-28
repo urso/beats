@@ -39,7 +39,7 @@ type runner struct {
 	log       *logp.Logger
 	agent     *beat.Info
 	wg        sync.WaitGroup
-	sig       concert.OnceSignaler
+	sig       *concert.OnceSignaler
 	input     v2.Input
 	connector beat.PipelineConnector
 	meta      *common.MapStrPointer

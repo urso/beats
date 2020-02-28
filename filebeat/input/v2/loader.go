@@ -180,7 +180,7 @@ func (cl *ConfigsLoader) Configure(cfg *common.Config) (Input, error) {
 			ctx.Cancelation = grpContext
 			for _, input := range inputs {
 				grp.Go(func() error {
-					return input.Run(ctx)
+					return input.Run(ctx, conn)
 				})
 			}
 			return grp.Wait()
