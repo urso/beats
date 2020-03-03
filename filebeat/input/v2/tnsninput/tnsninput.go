@@ -1,9 +1,9 @@
 package tnsninput
 
 import (
-	v2 "github.com/elastic/beats/filebeat/input/v2"
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/feature"
+	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/feature"
 )
 
 // Loader creates inputs from a configuration by finding and calling the right

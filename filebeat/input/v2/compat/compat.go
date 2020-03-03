@@ -126,5 +126,5 @@ func (r *runner) Start() {
 func (r *runner) Stop() {
 	r.sig.Trigger()
 	r.wg.Wait()
-	log.Infof("Input '%v' stopped", r.input.Name)
+	r.log.Infof("Input '%v' stopped", r.input.Name)
 }
