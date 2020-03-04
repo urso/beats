@@ -1,7 +1,9 @@
 package urlcollect
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -34,20 +36,20 @@ type Extension interface {
 type Registry v2.RegistryTree
 
 // Plugin to be added to a registry. The Plugin will be used to create an
-// Input.
+// Input. The inputs run and test functions will be executed per configured URL.
 type Plugin struct {
 	Name       string
 	Stability  feature.Stability
 	Deprecated bool
 	Info       string
 	Doc        string
-	Create     func(*common.Config) (Input, error)
+	Create     func(*common.Config) ([]*url.URL, Input, error)
 }
 
 // Input is created by the plugin. Inputs can optionally provide some testig functionality.
 type Input struct {
-	Run  func() error
-	Test func(v2.TestContext) error
+	Run  InputFunc
+	Test TestFunc
 }
 
 var _ v2.Loader = (*Loader)(nil)
@@ -59,20 +61,16 @@ var _ Extension = (*Registry)(nil)
 // Configure creates an Input from the configuration available in the PLugin registry.
 // Configure fails if the plugin is not known, or the plugin finds the configuration to be invalid.
 func (l *Loader) Configure(cfg *common.Config) (v2.Input, error) {
-	if l.Manager == nil {
-		panic(fmt.Errorf("no input manager"))
-	}
-	if l.Registry == nil {
-		panic(fmt.Errorf("no registry"))
-	}
-	typeField := l.TypeField
-	if typeField == "" {
-		typeField = "input"
-	}
+	required(l.Manager != nil, "no input manager set")
+	required(l.Registry != nil, "no registry set")
 
-	name, err := cfg.String(typeField, -1)
+	typeField := l.getTypeField()
+	name, err := getPluginName(typeField, cfg)
 	if err != nil {
-		return v2.Input{}, err
+		return v2.Input{}, &v2.LoaderError{
+			Reason:  v2.ErrNoInputConfigured,
+			Message: fmt.Sprintf("%v setting is missing", typeField),
+		}
 	}
 
 	plugin, ok := l.Registry.findPlugin(name)
@@ -80,20 +78,32 @@ func (l *Loader) Configure(cfg *common.Config) (v2.Input, error) {
 		return v2.Input{}, &v2.LoaderError{Name: name, Reason: v2.ErrUnknown}
 	}
 
-	input, err := plugin.Create(cfg)
+	urls, input, err := plugin.Create(cfg)
 	if err != nil {
 		return v2.Input{}, &v2.LoaderError{Name: name, Reason: err}
 	}
 
+	return l.castInput(plugin.Name, urls, input), nil
+}
+
+func (l *Loader) castInput(name string, urls []*url.URL, input Input) v2.Input {
 	managedInput := &managedInput{
+		urls:    urls,
 		manager: l.Manager,
-		run:     input.Run,
+		input:   input,
 	}
 	return v2.Input{
-		Name: plugin.Name,
+		Name: name,
 		Run:  managedInput.Run,
-		Test: input.Test,
-	}, nil
+		Test: managedInput.Test,
+	}
+}
+
+func (l *Loader) getTypeField() string {
+	if l.TypeField == "" {
+		return "input"
+	}
+	return l.TypeField
 }
 
 // NewRegistry creates a new Registry from the list of Registrations and Plugins.
@@ -146,5 +156,18 @@ func (p *Plugin) Details() feature.Details {
 		Deprecated: p.Deprecated,
 		Info:       p.Info,
 		Doc:        p.Doc,
+	}
+}
+
+func getPluginName(typeField string, cfg *common.Config) (string, error) {
+	if typeField == "" {
+		typeField = "input"
+	}
+	return cfg.String(typeField, -1)
+}
+
+func required(b bool, msg string) {
+	if !b {
+		panic(errors.New(msg))
 	}
 }
