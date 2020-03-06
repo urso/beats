@@ -36,6 +36,11 @@ type Resource struct {
 	entry *resourceEntry
 }
 
+type canceller interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
 func newResource(store *Store, key ResourceKey) *Resource {
 	res := &Resource{
 		store:    store,
@@ -101,6 +106,15 @@ func (r *Resource) Lock() {
 	r.link(true)
 	r.entry.Lock()
 	r.isLocked = true
+}
+
+func (r *Resource) LockContext(ctx canceller) error {
+	checkNotLocked(r.IsLocked())
+
+	r.link(true)
+	err := r.entry.LockContext(ctx)
+	r.isLocked = err == nil
+	return err
 }
 
 // TryLock attempts to lock the resource. It returns true if the lock has been

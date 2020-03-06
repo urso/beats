@@ -93,6 +93,15 @@ func (r *resourceEntry) TryLock() bool {
 	}
 }
 
+func (r *resourceEntry) LockContext(ctx canceller) error {
+	select {
+	case <-r.lock:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (r *resourceEntry) Unlock() {
 	r.lock <- struct{}{}
 }
