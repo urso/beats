@@ -1,15 +1,10 @@
 package urlcollect
 
 import (
-	"net/url"
-
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/filebeat/input/v2/statestore"
-	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/registry"
-	"github.com/elastic/go-concert/ctxtool"
-	"golang.org/x/sync/errgroup"
 )
 
 // InputManager controls the execution of active inputs.
@@ -20,20 +15,21 @@ type InputManager struct {
 	storeConnector *statestore.Connector
 }
 
-type InputFunc func() error
+type Cursor interface {
+	// IsNew returns true if the cursor is not yet known by the registry.
+	IsNew() bool
 
-type TestFunc func(v2.TestContext, *url.URL) error
+	// Unpack reads the cursor into a custom data structure
+	Unpack(to interface{}) error
 
-type managedInput struct {
-	urls    []*url.URL
-	manager *InputManager
-	input   Input
+	// Migrate updates the cursot contents. Migrate should only be used to update
+	// the internal cursor format/schema. The Migrate operation will completely delete the old entry and replace it with a new one.
+	// Do not use Migrate to store the recent cursor state in the registry.
+	Migrate(interface{}) error
 }
 
-type urlInputState struct {
-	url         *url.URL
-	registryKey string
-	err         error
+type managedCursor struct {
+	res statestore.Resource
 }
 
 func NewInputManager(log *logp.Logger, registry *registry.Registry) *InputManager {
@@ -48,22 +44,14 @@ func NewInputManager(log *logp.Logger, registry *registry.Registry) *InputManage
 	}
 }
 
-func (m *managedInput) Run(ctx v2.Context, pc beat.PipelineConnector) error {
+func (m InputManager) withCursor(cancel v2.Canceler, key string, fn func(c *managedCursor)) {
 	panic("TODO")
 }
 
-// Test runs the inputs' Test function for each configured base URL.
-func (m *managedInput) Test(ctx v2.TestContext) error {
-	if m.input.Test == nil || len(m.urls) == 0 {
-		return nil
-	}
-
-	grp, grpContext := errgroup.WithContext(ctxtool.FromCanceller(ctx.Cancelation))
-	ctx.Cancelation = grpContext
-	for _, url := range m.urls {
-		grp.Go(func() error {
-			return m.input.Test(ctx, url)
-		})
-	}
-	return grp.Wait()
+func (c *managedCursor) IsNew() bool {
+	has, err := !c.res.Has()
+	return !has || err != nil
 }
+
+func (c *managedCursor) Unpack(to interface{}) error   { return c.res.Read(to) }
+func (c *managedCursor) Migrate(val interface{}) error { return c.res.Replace(val) }

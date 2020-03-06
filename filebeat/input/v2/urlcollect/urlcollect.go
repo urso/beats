@@ -52,11 +52,17 @@ type Input struct {
 	Test TestFunc
 }
 
+type InputFunc func(v2.Context, *InputManager, *url.URL) error
+
+type TestFunc func(v2.TestContext, *url.URL) error
+
 var _ v2.Loader = (*Loader)(nil)
 var _ v2.Plugin = (*Plugin)(nil)
 var _ v2.Registry = (*Registry)(nil)
 var _ Extension = (*Plugin)(nil)
 var _ Extension = (*Registry)(nil)
+
+var errNoEndpointConfigured = errors.New("no address configured")
 
 // Configure creates an Input from the configuration available in the PLugin registry.
 // Configure fails if the plugin is not known, or the plugin finds the configuration to be invalid.
@@ -82,15 +88,19 @@ func (l *Loader) Configure(cfg *common.Config) (v2.Input, error) {
 	if err != nil {
 		return v2.Input{}, &v2.LoaderError{Name: name, Reason: err}
 	}
+	if len(urls) == 0 {
+		return v2.Input{}, &v2.LoaderError{Name: name, Reason: errNoEndpointConfigured}
+	}
 
 	return l.castInput(plugin.Name, urls, input), nil
 }
 
 func (l *Loader) castInput(name string, urls []*url.URL, input Input) v2.Input {
 	managedInput := &managedInput{
-		urls:    urls,
-		manager: l.Manager,
-		input:   input,
+		urls:       urls,
+		pluginName: name,
+		manager:    l.Manager,
+		input:      input,
 	}
 	return v2.Input{
 		Name: name,
