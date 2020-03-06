@@ -6,8 +6,10 @@ import (
 	"net/url"
 
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/feature"
+	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
 // Loader create new inputs.
@@ -52,7 +54,32 @@ type Input struct {
 	Test TestFunc
 }
 
-type InputFunc func(v2.Context, *InputManager, *url.URL) error
+type InputFunc func(Context, *url.URL, Cursor) error
+
+type Context struct {
+	ID          string
+	Agent       beat.Info
+	Logger      *logp.Logger
+	Cancelation v2.Canceler
+	Publisher   Publisher
+}
+
+type Cursor interface {
+	// IsNew returns true if the cursor is not yet known by the registry.
+	IsNew() bool
+
+	// Unpack reads the cursor into a custom data structure
+	Unpack(to interface{}) error
+
+	// Migrate updates the cursot contents. Migrate should only be used to update
+	// the internal cursor format/schema. The Migrate operation will completely delete the old entry and replace it with a new one.
+	// Do not use Migrate to store the recent cursor state in the registry.
+	Migrate(interface{}) error
+}
+
+type Publisher interface {
+	Publish(event beat.Event, cursor interface{}) error
+}
 
 type TestFunc func(v2.TestContext, *url.URL) error
 
@@ -96,7 +123,7 @@ func (l *Loader) Configure(cfg *common.Config) (v2.Input, error) {
 }
 
 func (l *Loader) castInput(name string, urls []*url.URL, input Input) v2.Input {
-	managedInput := &managedInput{
+	inst := &urlsInput{
 		urls:       urls,
 		pluginName: name,
 		manager:    l.Manager,
@@ -104,8 +131,8 @@ func (l *Loader) castInput(name string, urls []*url.URL, input Input) v2.Input {
 	}
 	return v2.Input{
 		Name: name,
-		Run:  managedInput.Run,
-		Test: managedInput.Test,
+		Run:  inst.Run,
+		Test: inst.Test,
 	}
 }
 
