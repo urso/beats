@@ -199,7 +199,7 @@ func (r *Resource) Update(val interface{}) error {
 	// update cached state if in-memory and persistent state are not in sync.
 	entry.value.mux.Lock()
 	defer entry.value.mux.Unlock()
-	if entry.value.pending != 0 {
+	if entry.value.pending != 0 && entry.value.cached != nil {
 		if err := typeconv.Convert(&entry.value.cached, val); err != nil {
 			return &Error{op: op, message: "failed to update in memory state", cause: err}
 		}
@@ -207,6 +207,34 @@ func (r *Resource) Update(val interface{}) error {
 
 	err := r.store.shared.persistentStore.Update(func(tx *registry.Tx) error {
 		return tx.Update(registry.Key(r.key), val)
+	})
+	if err != nil {
+		return &Error{op: op, message: "failed to update persistent store", cause: err}
+	}
+	return nil
+}
+
+func (r *Resource) Replace(val interface{}) error {
+	const op = "resource/update"
+
+	if !r.store.active.Load() {
+		return raiseClosed(op)
+	}
+
+	checkLocked(r.IsLocked())
+
+	entry := r.entry
+	invariant(entry != nil, "in memory state is not linked as expected")
+
+	// update cached state if in-memory and persistent state are not in sync.
+	entry.value.mux.Lock()
+	defer entry.value.mux.Unlock()
+	if entry.value.pending != 0 {
+		entry.value.cached = nil
+	}
+
+	err := r.store.shared.persistentStore.Update(func(tx *registry.Tx) error {
+		return tx.Set(registry.Key(r.key), val)
 	})
 	if err != nil {
 		return &Error{op: op, message: "failed to update persistent store", cause: err}
@@ -235,8 +263,9 @@ func (r *Resource) Read(to interface{}) error {
 
 		// If in-memory and persistent store are not in sync, we require
 		// the in-memory store to be the most authorative.
-		if entry.value.pending != 0 {
+		if entry.value.pending != 0 && entry.value.cached != nil {
 			defer entry.value.mux.Unlock()
+
 			if err := typeconv.Convert(to, entry.value.cached); err != nil {
 				return &Error{op: op, message: "failed to read in-memory state", cause: err}
 			}
