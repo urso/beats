@@ -74,20 +74,43 @@ func NewListener(family Family, location string, handlerFactory HandlerFactory, 
 
 // Start listen to the socket.
 func (l *Listener) Start() error {
-	var err error
-	l.Listener, err = l.listenerFactory()
-	if err != nil {
+	if err := l.initListen(); err != nil {
 		return err
 	}
-
-	l.closer.SetCallback(func() { l.Listener.Close() })
-	l.log.Info("Started listening for " + l.family.String() + " connection")
 
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
 		l.run()
 	}()
+	return nil
+}
+
+// Run start and run a new TCP listener to receive new data. When a new connection is accepted, the factory is used
+// to create a ConnectionHandler. The ConnectionHandler takes the connection as input and handles the data that is
+// being received via tha io.Reader. Most clients use the splitHandler which can take a bufio.SplitFunc and parse
+// out each message into an appropriate event. The Close() of the ConnectionHandler can be used to clean up the
+// connection either by client or server based on need.
+func (l *Listener) Run() error {
+	if err := l.initListen(); err != nil {
+		return err
+	}
+
+	l.wg.Add(1)
+	defer l.wg.Done()
+	l.run()
+	return nil
+}
+
+func (l *Listener) initListen() error {
+	var err error
+	l.Listener, err = l.listenerFactory()
+	if err != nil {
+		return err
+	}
+
+	l.closer.callback = func() { l.Listener.Close() }
+	l.log.Info("Started listening for TCP connection")
 	return nil
 }
 

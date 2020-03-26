@@ -141,7 +141,6 @@ require (
 	github.com/tsg/gopacket v0.0.0-20190320122513-dd3d0e41124a
 	github.com/urso/diag v0.0.0-20200210123136-21b3cc8eb797
 	github.com/urso/ecslog v0.0.1
-	github.com/urso/magetools v0.0.0-20200106130147-61080ed7b22b // indirect
 	github.com/urso/sderr v0.0.0-20200210124243-c2a16f3d43ec
 	github.com/vmware/govmomi v0.0.0-20170802214208-2cad15190b41
 	github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c
