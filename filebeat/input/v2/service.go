@@ -10,6 +10,8 @@ type BackgroundService interface {
 
 type serviceList []BackgroundService
 
+// CombineServices combinees a list of background services into a single
+// BackgroundService.
 func CombineServices(services ...BackgroundService) BackgroundService {
 	return serviceList(services)
 }

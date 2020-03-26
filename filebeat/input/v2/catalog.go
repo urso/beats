@@ -11,6 +11,8 @@ type Catalog struct {
 	subs    []*Catalog
 }
 
+// Addon marks types that can be added to a Catalog instance. It is implemented
+// by Plugin and Catalog only.
 type Addon interface {
 	addToCatalog(*Catalog)
 }
@@ -70,6 +72,8 @@ func (r *Catalog) each(fn func(Plugin) bool) bool {
 	return true
 }
 
+// Find searches for an existing extension for the given name. It returns
+// an error if the extension does not exist.
 func (c *Catalog) Find(name string) (Extension, error) {
 	plugin, ok := c.find(name)
 	if !ok {
