@@ -33,7 +33,7 @@ func (p Plugin) Configure(cfg *common.Config) (Input, error) {
 	return p.Manager.Create(cfg)
 }
 
-func (p Plugin) addToCatalog(parent *Catalog) {
+func (p Plugin) addToRegistry(parent *Registry) {
 	if parent.plugins == nil {
 		parent.plugins = make(map[string]Plugin)
 	}

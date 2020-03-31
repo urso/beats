@@ -7,8 +7,8 @@ import (
 	"github.com/elastic/beats/v7/libbeat/registry"
 )
 
-func osInputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Catalog {
-	return v2.NewCatalog(
+func osInputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Registry {
+	return v2.NewRegistry(
 	// TODO: add windows event logs
 	)
 }

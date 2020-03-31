@@ -23,8 +23,8 @@ type Extension interface {
 
 type collectionList []Collection
 
-func CombineCollections(catalogs ...Collection) Collection {
-	return collectionList(catalogs)
+func CombineCollections(regs ...Collection) Collection {
+	return collectionList(regs)
 }
 
 // ValidateCollection checks if there are multiple extensions with the same name
@@ -55,7 +55,7 @@ func ValidateCollection(c Collection) error {
 		return errs[0]
 	}
 
-	return sderr.WrapAll(errs, "catalog has multiple duplicate plugins")
+	return sderr.WrapAll(errs, "registry has multiple duplicate plugins")
 }
 
 func (l collectionList) CreateService(prefix string) (BackgroundService, error) {
