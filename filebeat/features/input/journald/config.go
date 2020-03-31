@@ -1,6 +1,7 @@
 package journald
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -54,6 +55,8 @@ var seekModes = map[string]seekMode{
 	"cursor": seekCursor,
 }
 
+var errInvalidSeekFallback = errors.New("invalid setting for cursor_seek_fallback")
+
 func defaultConfig() config {
 	return config{
 		Backoff:            1 * time.Second,
@@ -62,6 +65,13 @@ func defaultConfig() config {
 		CursorSeekFallback: seekHead,
 		SaveRemoteHostname: false,
 	}
+}
+
+func (c *config) Validate() error {
+	if c.CursorSeekFallback != seekHead && c.CursorSeekFallback != seekTail {
+		return errInvalidSeekFallback
+	}
+	return nil
 }
 
 // Unpack validates and unpack "seek" config option

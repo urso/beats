@@ -6,7 +6,6 @@ import (
 
 	"github.com/coreos/go-systemd/sdjournal"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
-	"github.com/elastic/beats/v7/journalbeat/reader"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
@@ -26,9 +25,16 @@ type journald struct {
 }
 
 type checkpoint struct {
-	Version  int
-	Position string
+	Version            int
+	Position           string
+	RealtimeTimestamp  uint64
+	MonotonicTimestamp uint64
 }
+
+const (
+	// LocalSystemJournalID is the ID of the local system journal.
+	localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
+)
 
 func Plugin(log *logp.Logger, reg *registry.Registry, defaultStore string) input.Plugin {
 	return input.Plugin{
@@ -38,6 +44,7 @@ func Plugin(log *logp.Logger, reg *registry.Registry, defaultStore string) input
 		Info:       "journald input",
 		Doc:        "The journald input collects logs from the local journald service",
 		Manager: &CursorInputManager{
+			Logger:       log,
 			Registry:     reg,
 			DefaultStore: defaultStore,
 			Type:         "journald",
@@ -60,7 +67,7 @@ func configure(cfg *common.Config) ([]Source, CursorInput, error) {
 
 	paths := config.Paths
 	if len(paths) == 0 {
-		paths = []string{reader.LocalSystemJournalID}
+		paths = []string{localSystemJournalID}
 	}
 
 	sources := make([]Source, len(paths))
@@ -100,6 +107,9 @@ func (inp *journald) Run(
 	cursor Cursor,
 	publish func(beat.Event, interface{}) error,
 ) error {
+	log := ctx.Logger.With("path", src.Name())
+	checkpoint := initCheckpoint(log, cursor)
+
 	j, err := openJournal(src.Name())
 	if err != nil {
 		return err
@@ -110,13 +120,33 @@ func (inp *journald) Run(
 		return sderr.Wrap(err, "failed to apply filters to the %{path} journal", src.Name())
 	}
 
-	log := ctx.Logger.With("path", src.Name())
-	checkpoint := initCheckpoint(log, cursor)
-	backoff := backoff.NewExpBackoff(ctx.Cancelation.Done(), inp.Backoff, inp.MaxBackoff)
+	reader := &reader{
+		log:     ctx.Logger,
+		journal: j,
+		backoff: backoff.NewExpBackoff(ctx.Cancelation.Done(), inp.Backoff, inp.MaxBackoff),
+	}
+	seekJournal(log, reader, checkpoint, inp.Seek, inp.CursorSeekFallback)
 
-	seekJournal(log, j, checkpoint, inp.Seek, inp.CursorSeekFallback)
+	converter := eventConverter{
+		log:                log,
+		saveRemoteHostname: inp.SaveRemoteHostname,
+	}
 
-	panic("TODO")
+	for {
+		entry, err := reader.Next(ctx.Cancelation)
+		if err != nil {
+			return err
+		}
+
+		event := converter.Convert(entry)
+		checkpoint.Position = entry.Cursor
+		checkpoint.RealtimeTimestamp = entry.RealtimeTimestamp
+		checkpoint.MonotonicTimestamp = entry.MonotonicTimestamp
+
+		if err := publish(event, checkpoint); err != nil {
+			return err
+		}
+	}
 }
 
 func initCheckpoint(log *logp.Logger, c Cursor) checkpoint {
@@ -140,7 +170,7 @@ func initCheckpoint(log *logp.Logger, c Cursor) checkpoint {
 }
 
 func openJournal(path string) (*sdjournal.Journal, error) {
-	if path == reader.LocalSystemJournalID {
+	if path == localSystemJournalID {
 		j, err := sdjournal.NewJournal()
 		if err != nil {
 			err = sderr.Wrap(err, "failed to open local journal")
@@ -172,44 +202,18 @@ func openJournal(path string) (*sdjournal.Journal, error) {
 // from the last known position.
 // The checkpoint is ignored if the user has configured the input to always
 // seek to the head/tail of the journal on startup.
-func seekJournal(log *logp.Logger, j *sdjournal.Journal, cp checkpoint, seek, defaultSeek seekMode) {
-	switch seek {
-	case seekCursor:
-		if cp.Position == "" {
-			seekJournalNew(log, j, defaultSeek)
-		} else {
-			j.SeekCursor(cp.Position)
-			_, err := j.Next()
-			if err != nil {
-				log.Errorf("Error while seeking to cursor: %+v", err)
-			} else {
-				log.Debug("Seeked to position defined in cursor")
-			}
+func seekJournal(log *logp.Logger, reader *reader, cp checkpoint, seek, defaultSeek seekMode) {
+	mode := seek
+	if mode == seekCursor && cp.Position == "" {
+		mode = defaultSeek
+		if mode != seekHead && mode != seekTail {
+			log.Error("Invalid option for cursor_seek_fallback")
+			mode = seekHead
 		}
-	case seekTail:
-		j.SeekTail()
-		j.Next()
-		log.Debug("Tailing the journal file")
-	case seekHead:
-		j.SeekHead()
-		log.Debug("Reading from the beginning of the journal file")
-	default:
-		log.Error("Invalid seeking mode")
 	}
-}
 
-// seekJournalNew is used to seek to a configured journald location, in case we
-// do not have store a cursor in the registry file.
-func seekJournalNew(log *logp.Logger, j *sdjournal.Journal, mode seekMode) {
-	switch mode {
-	case seekHead:
-		j.SeekHead()
-		log.Debug("Seeking method set to cursor, but no state is saved for reader. Starting to read from the beginning")
-	case seekTail:
-		j.SeekTail()
-		j.Next()
-		log.Debug("Seeking method set to cursor, but no state is saved for reader. Starting to read from the end")
-	default:
-		log.Error("Invalid option for cursor_seek_fallback")
+	err := reader.Seek(mode, cp.Position)
+	if err != nil {
+		log.Error("Continue from current position. Seek failed with: %v", err)
 	}
 }
