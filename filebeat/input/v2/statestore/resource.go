@@ -36,6 +36,11 @@ type Resource struct {
 	entry *resourceEntry
 }
 
+type canceller interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
 func newResource(store *Store, key ResourceKey) *Resource {
 	res := &Resource{
 		store:    store,
@@ -101,6 +106,18 @@ func (r *Resource) Lock() {
 	r.link(true)
 	r.entry.Lock()
 	r.isLocked = true
+}
+
+// LockContext attempts to lock the resource. It returns nil if the lock has
+// been acquired successfully. The error valuer report by ctx.Err() is returned
+// if the operation was canceled.
+func (r *Resource) LockContext(ctx canceller) error {
+	checkNotLocked(r.IsLocked())
+
+	r.link(true)
+	err := r.entry.LockContext(ctx)
+	r.isLocked = err == nil
+	return err
 }
 
 // TryLock attempts to lock the resource. It returns true if the lock has been
@@ -207,6 +224,36 @@ func (r *Resource) Update(val interface{}) error {
 
 	err := r.store.shared.persistentStore.Update(func(tx *registry.Tx) error {
 		return tx.Update(registry.Key(r.key), val)
+	})
+	if err != nil {
+		return &Error{op: op, message: "failed to update persistent store", cause: err}
+	}
+	return nil
+}
+
+// Replace overwrites the resource in the registry. All fields of the original state
+// that are not in `val` will be removed.
+func (r *Resource) Replace(val interface{}) error {
+	const op = "resource/update"
+
+	if !r.store.active.Load() {
+		return raiseClosed(op)
+	}
+
+	checkLocked(r.IsLocked())
+
+	entry := r.entry
+	invariant(entry != nil, "in memory state is not linked as expected")
+
+	// update cached state if in-memory and persistent state are not in sync.
+	entry.value.mux.Lock()
+	defer entry.value.mux.Unlock()
+	if entry.value.pending != 0 {
+		entry.value.cached = nil
+	}
+
+	err := r.store.shared.persistentStore.Update(func(tx *registry.Tx) error {
+		return tx.Set(registry.Key(r.key), val)
 	})
 	if err != nil {
 		return &Error{op: op, message: "failed to update persistent store", cause: err}
