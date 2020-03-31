@@ -2,7 +2,10 @@ package journald
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/coreos/go-systemd/sdjournal"
 )
 
 // Config stores the options of a journald input.
@@ -24,13 +27,15 @@ type config struct {
 	CursorSeekFallback seekMode `config:"cursor_seek_fallback"`
 
 	// Matches store the key value pairs to match entries.
-	Matches []string `config:"include_matches"`
+	Matches []matcher `config:"include_matches"`
 
 	// SaveRemoteHostname defines if the original source of the entry needs to be saved.
 	SaveRemoteHostname bool `config:"save_remote_hostname"`
 }
 
 type seekMode uint
+
+type matcher string
 
 const (
 	// seekInvalid is an invalid value for seek
@@ -67,5 +72,52 @@ func (m *seekMode) Unpack(value string) error {
 	}
 
 	*m = mode
+	return nil
+}
+
+func (m *matcher) Unpack(value string) error {
+	tmp, err := compileMatch(value)
+	if err != nil {
+		return err
+	}
+	*m = tmp
+	return nil
+}
+
+func (m matcher) Apply(j *sdjournal.Journal) error {
+	err := j.AddMatch(string(m))
+	if err != nil {
+		return fmt.Errorf("error adding match '%s' to journal: %v", m, err)
+	}
+	return nil
+}
+
+func compileMatch(in string) (matcher, error) {
+	elems := strings.Split(in, "=")
+	if len(elems) != 2 {
+		return "", fmt.Errorf("invalid match format: %s", in)
+	}
+
+	for journalKey, eventField := range journaldEventFields {
+		if elems[0] == eventField.name {
+			return matcher(journalKey + "=" + elems[1]), nil
+		}
+	}
+
+	// pass custom fields as is
+	return matcher(in), nil
+}
+
+func applyMatchers(j *sdjournal.Journal, matchers []matcher) error {
+	for _, m := range matchers {
+		if err := m.Apply(j); err != nil {
+			return err
+		}
+
+		if err := j.AddDisjunction(); err != nil {
+			return fmt.Errorf("error adding disjunction to journal: %v", err)
+		}
+	}
+
 	return nil
 }
