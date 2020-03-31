@@ -13,6 +13,7 @@ type StatelessInputManager struct {
 }
 
 type StatelessInput interface {
+	Name() string
 	Test(TestContext) error
 	Run(ctx Context, publish func(beat.Event)) error
 }
@@ -34,6 +35,8 @@ func (sim StatelessInputManager) Create(cfg *common.Config) (Input, error) {
 	}
 	return statelessInputInst{si}, nil
 }
+
+func (si statelessInputInst) Name() string { return si.input.Name() }
 
 func (si statelessInputInst) Run(ctx Context, pipeline beat.PipelineConnector) (err error) {
 	defer func() {

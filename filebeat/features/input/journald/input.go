@@ -31,14 +31,14 @@ type checkpoint struct {
 	MonotonicTimestamp uint64
 }
 
-const (
-	// LocalSystemJournalID is the ID of the local system journal.
-	localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
-)
+// LocalSystemJournalID is the ID of the local system journal.
+const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
+
+const pluginName = "journald"
 
 func Plugin(log *logp.Logger, reg *registry.Registry, defaultStore string) input.Plugin {
 	return input.Plugin{
-		Name:       "journald",
+		Name:       pluginName,
 		Stability:  feature.Beta,
 		Deprecated: false,
 		Info:       "journald input",
@@ -47,7 +47,7 @@ func Plugin(log *logp.Logger, reg *registry.Registry, defaultStore string) input
 			Logger:       log,
 			Registry:     reg,
 			DefaultStore: defaultStore,
-			Type:         "journald",
+			Type:         pluginName,
 			Configure:    configure,
 		},
 	}
@@ -84,6 +84,8 @@ func configure(cfg *common.Config) ([]Source, CursorInput, error) {
 		SaveRemoteHostname: config.SaveRemoteHostname,
 	}, nil
 }
+
+func (inp *journald) Name() string { return pluginName }
 
 func (inp *journald) Test(src Source, ctx input.TestContext) error {
 	// 1. check if we can open the journal

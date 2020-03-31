@@ -31,7 +31,18 @@ type InputManager interface {
 // Input is a configured input object that can be used to probe or start
 // the actual data processing.
 type Input interface {
+	// TODO: check if/how we can remove this method. Currently it is required for
+	// compatibility reasons with existing interfaces in libbeat, autodiscovery
+	// and filebeat.
+	Name() string
+
+	// Test checks the configuaration and runs addition checks if the Input can be
+	// initialized from the configuration (e.g. check if host/port or files are
+	// accessible).
 	Test(TestContext) error
+
+	// Run executes the data collection loop. Run must return an error only if the
+	// error can not be recovered.
 	Run(Context, beat.PipelineConnector) error
 }
 

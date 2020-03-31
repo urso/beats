@@ -29,6 +29,7 @@ type CursorInputManager struct {
 }
 
 type CursorInput interface {
+	Name() string
 	Test(Source, input.TestContext) error
 	Run(input.Context, Source, Cursor, func(beat.Event, interface{}) error) error
 }
@@ -70,6 +71,8 @@ func (cim *CursorInputManager) openStore() (*statestore.Store, error) {
 	})
 	return cim.storeConnector.Open(cim.DefaultStore)
 }
+
+func (inp *managedInput) Name() string { return inp.input.Name() }
 
 func (inp *managedInput) Test(ctx input.TestContext) error {
 	var grp unison.MultiErrGroup

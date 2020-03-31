@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -53,4 +54,10 @@ func (g *group) Go(fn func() error) {
 func (g *group) Wait() []error {
 	g.wg.Wait()
 	return g.runErrs.Errors()
+}
+
+func required(b bool, msg string) {
+	if !b {
+		panic(errors.New(msg))
+	}
 }

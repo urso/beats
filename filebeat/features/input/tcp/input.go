@@ -53,6 +53,8 @@ func newServer(config config) (*server, error) {
 	return &server{config: config, splitFunc: splitFunc}, nil
 }
 
+func (s *server) Name() string { return "tcp" }
+
 // Test checks if the server can be executed as is by trying to bind the port.
 func (s *server) Test(ctx input.TestContext) error {
 	tlsConfig, err := tlscommon.LoadTLSServerConfig(s.TLS)
