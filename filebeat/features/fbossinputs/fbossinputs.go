@@ -10,10 +10,13 @@ import (
 
 func Inputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Registry {
 	return v2.NewRegistry(
-		// list of inputs for the current OS build target
+		genericInputs()
 		osInputs(info, log, reg),
+	)
+}
 
-		// list of os unspecific inputs
+func genericInputs() *v2.Registry {
+	return v2.NewRegistry(
 		tcp.Plugin(),
 	)
 }

@@ -10,5 +10,5 @@ import (
 )
 
 func osInputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Catalog {
-	return v2.NewCatalog()
+	return v2.NewRegistry()
 }
