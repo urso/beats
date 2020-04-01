@@ -27,9 +27,12 @@ import (
 	"github.com/elastic/beats/v7/filebeat/channel"
 	"github.com/elastic/beats/v7/filebeat/config"
 	cfg "github.com/elastic/beats/v7/filebeat/config"
+	"github.com/elastic/beats/v7/filebeat/features/fbossinputs"
 	"github.com/elastic/beats/v7/filebeat/fileset"
 	_ "github.com/elastic/beats/v7/filebeat/include"
 	"github.com/elastic/beats/v7/filebeat/input"
+	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/filebeat/input/v2/compat"
 	"github.com/elastic/beats/v7/filebeat/registrar"
 	"github.com/elastic/beats/v7/libbeat/autodiscover"
 	"github.com/elastic/beats/v7/libbeat/beat"
@@ -268,8 +271,18 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 		logp.Warn(pipelinesWarning)
 	}
 
+	inputsLogger := logp.NewLogger("input")
+	v2InputLoader, err := v2.NewLoader(fbossinputs.Inputs(b.Info, inputsLogger, stateStore), "type", "")
+	if err != nil {
+		panic(err) // loader detected invalid state.
+	}
 	inputLoader := channel.RunnerFactoryWithCommonInputSettings(b.Info,
-		input.NewRunnerFactory(pipelineConnector, registrar, fb.done))
+		compat.Combine(
+			compat.RunnerFactory(inputsLogger, b.Info, v2InputLoader),
+			input.NewRunnerFactory(pipelineConnector, registrar, fb.done),
+		),
+	)
+
 	moduleLoader := fileset.NewFactory(inputLoader, b.Info, pipelineLoaderFactory, config.OverwritePipelines)
 
 	crawler, err := newCrawler(inputLoader, moduleLoader, config.Inputs, fb.done, *once)
