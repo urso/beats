@@ -307,6 +307,8 @@ github.com/containerd/continuity/sysx
 github.com/containerd/fifo
 # github.com/coreos/bbolt v1.3.1-coreos.6.0.20180318001526-af9db2027c98
 github.com/coreos/bbolt
+# github.com/coreos/go-systemd v0.0.0-20190321100706-95778dfbb74e
+github.com/coreos/go-systemd/sdjournal
 # github.com/coreos/go-systemd/v22 v22.0.0
 github.com/coreos/go-systemd/v22/activation
 github.com/coreos/go-systemd/v22/dbus
@@ -412,9 +414,11 @@ github.com/eclipse/paho.mqtt.golang
 github.com/eclipse/paho.mqtt.golang/packets
 # github.com/elastic/ecs v1.5.0
 github.com/elastic/ecs/code/go/ecs
-# github.com/elastic/go-concert v0.0.1
+# github.com/elastic/go-concert v0.0.2-0.20200330201210-ffc76909ee23
 github.com/elastic/go-concert
 github.com/elastic/go-concert/atomic
+github.com/elastic/go-concert/ctxtool
+github.com/elastic/go-concert/unison
 # github.com/elastic/go-libaudit v0.4.0
 github.com/elastic/go-libaudit
 github.com/elastic/go-libaudit/aucoalesce
