@@ -10,7 +10,7 @@ import (
 
 func Inputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Registry {
 	return v2.NewRegistry(
-		genericInputs()
+		genericInputs(),
 		osInputs(info, log, reg),
 	)
 }
