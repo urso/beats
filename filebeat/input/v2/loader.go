@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -47,4 +48,10 @@ func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 	}
 
 	return ext.Configure(cfg)
+}
+
+func required(b bool, msg string) {
+	if !b {
+		panic(errors.New(msg))
+	}
 }

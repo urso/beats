@@ -1,6 +1,9 @@
 package v2
 
-import "github.com/urso/sderr"
+import (
+	"github.com/elastic/go-concert/unison"
+	"github.com/urso/sderr"
+)
 
 // BackgroundService can be used to run maintenance tasks in the
 // background, even if no input is configured.
@@ -17,7 +20,7 @@ func CombineServices(services ...BackgroundService) BackgroundService {
 }
 
 func (sl serviceList) Run(cancel Canceler) error {
-	var group group
+	var group unison.MultiErrGroup
 	for _, service := range sl {
 		group.Go(func() error {
 			return service.Run(cancel)
