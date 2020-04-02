@@ -361,7 +361,7 @@ func checkLocked(b bool) {
 }
 
 func checkNotLocked(b bool) {
-	invariant(b, "invalid operation on locked resource")
+	invariant(!b, "invalid operation on locked resource")
 }
 
 func invariant(b bool, message string) {
