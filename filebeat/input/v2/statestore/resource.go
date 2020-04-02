@@ -357,7 +357,7 @@ func (r *Resource) UpdateOp(val interface{}) (*ResourceUpdateOp, error) {
 }
 
 func checkLocked(b bool) {
-	invariant(!b, "try to access unlocked resource")
+	invariant(b, "try to access unlocked resource")
 }
 
 func checkNotLocked(b bool) {
