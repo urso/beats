@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-systemd/sdjournal"
+	"github.com/coreos/go-systemd/v22/sdjournal"
 )
 
 // Config stores the options of a journald input.
