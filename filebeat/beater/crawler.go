@@ -127,7 +127,6 @@ func (c *crawler) startInput(
 	if _, ok := c.inputs[id]; ok {
 		return fmt.Errorf("input with same ID already exists: %v", id)
 	}
-
 	runner, err := c.inputsFactory.Create(pipeline, config, nil)
 	if err != nil {
 		return fmt.Errorf("Error while initializing input: %+v", err)
