@@ -10,7 +10,7 @@ import (
 
 // inputs that are only supported on linux
 
-func osInputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Catalog {
+func osInputs(info beat.Info, log *logp.Logger, reg *registry.Registry) *v2.Registry {
 	return v2.NewRegistry(
 		journald.Plugin(log, reg, info.Name),
 	)
