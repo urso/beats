@@ -133,11 +133,8 @@ func (inp *managedInput) runSource(
 	// Setup error recovery/reporting
 	defer func() {
 		if v := recover(); v != nil {
-			if e, ok := v.(error); ok {
-				err = e
-			} else {
-				err = fmt.Errorf("input panic with: %+v\n%s", v, debug.Stack())
-			}
+			err = fmt.Errorf("input panic with: %+v\n%s", v, debug.Stack())
+			ctx.Logger.Errorf("Input crashed with: %+v", err)
 		}
 	}()
 
