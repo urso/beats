@@ -30,7 +30,7 @@ func NewRegistry(extensions ...Addon) *Registry {
 }
 
 func (c *Registry) addToRegistry(parent *Registry) {
-	parent.subs = append(c.subs, c)
+	parent.subs = append(parent.subs, c)
 }
 
 // Add adds an existing registry or plugin.
