@@ -25,6 +25,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/elastic/beats/v7/filebeat/channel"
+	"github.com/elastic/beats/v7/filebeat/channel/pipetool"
 	"github.com/elastic/beats/v7/filebeat/config"
 	cfg "github.com/elastic/beats/v7/filebeat/config"
 	"github.com/elastic/beats/v7/filebeat/features/fbossinputs"
