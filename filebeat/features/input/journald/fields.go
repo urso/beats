@@ -1,14 +1,8 @@
-//+build linux,cgo
+// +build linux,cgo
 
 package journald
 
 import "github.com/coreos/go-systemd/v22/sdjournal"
-
-type fieldConversion struct {
-	name      string
-	isInteger bool
-	dropped   bool
-}
 
 var (
 	journaldEventFields = map[string]fieldConversion{

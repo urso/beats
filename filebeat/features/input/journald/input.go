@@ -1,3 +1,5 @@
+// +build linux,cgo
+
 package journald
 
 import (
@@ -140,7 +142,7 @@ func (inp *journald) Run(
 			return err
 		}
 
-		event := converter.Convert(entry)
+		event := converter.Convert(entry.RealtimeTimestamp, entry.Fields, journaldEventFields)
 		checkpoint.Position = entry.Cursor
 		checkpoint.RealtimeTimestamp = entry.RealtimeTimestamp
 		checkpoint.MonotonicTimestamp = entry.MonotonicTimestamp

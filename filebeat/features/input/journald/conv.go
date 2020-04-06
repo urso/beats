@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
@@ -16,13 +15,23 @@ type eventConverter struct {
 	saveRemoteHostname bool
 }
 
-func (conv *eventConverter) Convert(entry *sdjournal.JournalEntry) beat.Event {
+type fieldConversion struct {
+	name      string
+	isInteger bool
+	dropped   bool
+}
+
+func (conv *eventConverter) Convert(
+	timestamp uint64,
+	entryFields map[string]string,
+	convFields map[string]fieldConversion,
+) beat.Event {
 	created := time.Now()
 	fields := common.MapStr{}
 	var custom common.MapStr
 
-	for entryKey, v := range entry.Fields {
-		if fieldConversionInfo, ok := journaldEventFields[entryKey]; !ok {
+	for entryKey, v := range entryFields {
+		if fieldConversionInfo, ok := convFields[entryKey]; !ok {
 			if custom == nil {
 				custom = common.MapStr{}
 			}
@@ -48,7 +57,7 @@ func (conv *eventConverter) Convert(entry *sdjournal.JournalEntry) beat.Event {
 	}
 
 	fields.Put("event.created", created)
-	receivedByJournal := time.Unix(0, int64(entry.RealtimeTimestamp)*1000)
+	receivedByJournal := time.Unix(0, int64(timestamp)*1000)
 
 	return beat.Event{
 		Timestamp: receivedByJournal,
