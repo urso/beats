@@ -25,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/elastic/beats/v7/filebeat/channel"
-	"github.com/elastic/beats/v7/filebeat/channel/pipetool"
 	"github.com/elastic/beats/v7/filebeat/config"
 	cfg "github.com/elastic/beats/v7/filebeat/config"
 	"github.com/elastic/beats/v7/filebeat/features/fbossinputs"
@@ -283,7 +282,6 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 			input.NewRunnerFactory(pipelineConnector, registrar, fb.done),
 		),
 	)
-
 	moduleLoader := fileset.NewFactory(inputLoader, b.Info, pipelineLoaderFactory, config.OverwritePipelines)
 
 	crawler, err := newCrawler(inputLoader, moduleLoader, config.Inputs, fb.done, *once)
