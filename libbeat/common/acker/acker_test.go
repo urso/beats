@@ -15,6 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package pipeline
+package acker
 
 // TODO: add tests with simplified ACKers

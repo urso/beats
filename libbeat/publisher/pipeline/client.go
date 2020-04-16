@@ -38,7 +38,7 @@ type client struct {
 	processors beat.Processor
 	producer   queue.Producer
 	mutex      sync.Mutex
-	acker      ACKer
+	acker      beat.ACKer
 	waiter     *clientCloseWaiter
 
 	eventFlags   publisher.EventFlags

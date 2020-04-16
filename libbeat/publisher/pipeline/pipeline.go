@@ -27,6 +27,7 @@ import (
 
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/common/atomic"
 	"github.com/elastic/beats/v7/libbeat/common/reload"
 	"github.com/elastic/beats/v7/libbeat/logp"
@@ -294,7 +295,7 @@ func (p *Pipeline) ConnectWith(cfg beat.ClientConfig) (beat.Client, error) {
 		reportEvents: reportEvents,
 	}
 
-	acker := cfg.ACKHandler
+	ackHandler := cfg.ACKHandler
 
 	producerCfg := queue.ProducerConfig{}
 
@@ -315,20 +316,20 @@ func (p *Pipeline) ConnectWith(cfg beat.ClientConfig) (beat.Client, error) {
 	}
 
 	if waiter != nil {
-		if acker == nil {
-			acker = waiter
+		if ackHandler == nil {
+			ackHandler = waiter
 		} else {
-			acker = CombineACKers(waiter, acker)
+			ackHandler = acker.Combine(waiter, ackHandler)
 		}
 	}
 
-	if acker != nil {
-		producerCfg.ACK = acker.ACKEvents
+	if ackHandler != nil {
+		producerCfg.ACK = ackHandler.ACKEvents
 	} else {
-		acker = NilACKer()
+		ackHandler = acker.Nil()
 	}
 
-	client.acker = acker
+	client.acker = ackHandler
 	client.waiter = waiter
 	client.producer = p.queue.Producer(producerCfg)
 
