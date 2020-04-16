@@ -25,7 +25,6 @@ import (
 
 type Pipeline interface {
 	PipelineConnector
-	SetACKHandler(PipelineACKHandler) error
 }
 
 // PipelineConnector creates a publishing Client. This is typically backed by a Pipeline.
@@ -56,28 +55,38 @@ type ClientConfig struct {
 	// is configured
 	WaitClose time.Duration
 
+	// Configure ACK callback.
+	ACKHandler ACKer
+
 	// Events configures callbacks for common client callbacks
 	Events ClientEventer
+}
 
-	// ACK handler strategies.
-	// Note: ack handlers are run in another go-routine owned by the publisher pipeline.
-	//       They should not block for to long, to not block the internal buffers for
-	//       too long (buffers can only be freed after ACK has been processed).
-	// Note: It's not supported to configure multiple ack handler types. Use at
-	//       most one.
+// ACKer can be registered with a Client when connecting to the pipeline.
+// The ACKer will be informed when events are added or dropped by the processors,
+// and when an event has been ACKed by the outputs.
+//
+// Due to event publishing and ACKing are asynchronous operations, the
+// operations on ACKer are normally executed in different go routines. ACKers
+// are required to be multi-threading safe.
+type ACKer interface {
+	// AddEvent informs the ACKer that a new event has been send to the client.
+	// AddEvent is called after the processors have handled the event. If the
+	// event has been dropped by the processor `published` will be set to true.
+	// This allows the ACKer to do some bookeeping for dropped events.
+	AddEvent(event Event, published bool)
 
-	// ACKCount reports the number of published events recently acknowledged
-	// by the pipeline.
-	ACKCount func(int)
+	// ACK Events from the output and pipeline queue are forwarded to ACKEvents.
+	// The number of reported events only matches the known number of events downstream.
+	// ACKers might need to keep track of dropped events by themselves.
+	ACKEvents(n int)
 
-	// ACKEvents reports the events private data of recently acknowledged events.
-	// Note: The slice passed must be copied if the events are to be processed
-	//       after the handler returns.
-	ACKEvents func([]interface{})
-
-	// ACKLastEvent reports the last ACKed event out of a batch of ACKed events only.
-	// Only the events 'Private' field will be reported.
-	ACKLastEvent func(interface{})
+	// Close informs the ACKer that the Client used to publish to the pipeline has been closed.
+	// No new events should be published anymore. The ACKEvents method still will be actively called
+	// as long as there are pending events for the client in the pipeline. The Close signal can be used
+	// to supress any ACK event propagation if required.
+	// Close might be called from another go-routine than AddEvent and ACKEvents.
+	Close()
 }
 
 // CloseRef allows users to close the client asynchronously.
