@@ -29,6 +29,7 @@ import (
 	"github.com/elastic/beats/v7/filebeat/input"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/common/cfgwarn"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	awscommon "github.com/elastic/beats/v7/x-pack/libbeat/common/aws"
@@ -138,13 +139,15 @@ func NewInput(cfg *common.Config, connector channel.Connector, context input.Con
 		Processing: beat.ProcessingConfig{
 			DynamicFields: context.DynamicFields,
 		},
-		ACKEvents: func(privates []interface{}) {
-			for _, private := range privates {
-				if s3Context, ok := private.(*s3Context); ok {
-					s3Context.done()
+		ACKHandler: acker.ConnectionOnly(
+			acker.EventPrivateReporter(func(_ int, privates []interface{}) {
+				for _, private := range privates {
+					if s3Context, ok := private.(*s3Context); ok {
+						s3Context.done()
+					}
 				}
-			}
-		},
+			}),
+		),
 	})
 	if err != nil {
 		return nil, err

@@ -17,6 +17,7 @@ import (
 	"github.com/elastic/beats/v7/filebeat/input"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/common/cfgwarn"
 	"github.com/elastic/beats/v7/libbeat/common/useragent"
 	"github.com/elastic/beats/v7/libbeat/logp"
@@ -86,15 +87,17 @@ func newInput(
 		Processing: beat.ProcessingConfig{
 			DynamicFields: inputContext.DynamicFields,
 		},
-		ACKLastEvent: func(private interface{}) {
-			// Errors don't have a cursor.
-			if cursor, ok := private.(cursor); ok {
-				log.Debugf("ACKed cursor %+v", cursor)
-				if err := storage.Save(cursor); err != nil && err != errNoUpdate {
-					log.Errorf("Error saving state: %v", err)
+		ACKHandler: acker.ConnectionOnly(
+			acker.LastEventPrivateReporter(func(_ int, private interface{}) {
+				// Errors don't have a cursor.
+				if cursor, ok := private.(cursor); ok {
+					log.Debugf("ACKed cursor %+v", cursor)
+					if err := storage.Save(cursor); err != nil && err != errNoUpdate {
+						log.Errorf("Error saving state: %v", err)
+					}
 				}
-			}
-		},
+			}),
+		),
 	})
 	if err != nil {
 		return nil, err
