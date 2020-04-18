@@ -24,10 +24,6 @@ type statelessInputInst struct {
 
 var _ InputManager = StatelessInputManager{}
 
-func (_ StatelessInputManager) CreateService(prefix string) (BackgroundService, error) {
-	return nil, nil
-}
-
 func (sim StatelessInputManager) Create(cfg *common.Config) (Input, error) {
 	si, err := sim.Configure(cfg)
 	if err != nil {

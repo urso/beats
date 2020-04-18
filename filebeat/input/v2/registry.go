@@ -98,25 +98,3 @@ func (r *Registry) find(name string) (Plugin, bool) {
 	}
 	return Plugin{}, false
 }
-
-func (c *Registry) CreateService(prefix string) (BackgroundService, error) {
-	var err error
-	var services []BackgroundService
-	c.each(func(p Plugin) bool {
-		var service BackgroundService
-		service, err = p.Manager.CreateService(prefix)
-		if err == nil && service != nil {
-			services = append(services, service)
-		}
-		return err == nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if len(services) == 0 {
-		return nil, nil
-	}
-
-	return CombineServices(services...), nil
-}

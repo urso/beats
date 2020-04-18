@@ -9,18 +9,6 @@ import (
 // InputManager creates and maintains actions and background processes for an
 // input type.
 type InputManager interface {
-	// CreateServices creates an input types background service if applicable.
-	// If the input type does not require any kind of background services, nil
-	// shall be returned.
-	// The service will be run by the Beat, even if no Input is active. This
-	// allows the service to run maintenance tasks for the input type even if no
-	// input is currently active (for example remove entries from the registry).
-	//
-	// Note: Beats will always instantiate all background services upon startup.
-	//       Background services are shut down only after all inputs have been
-	//       stopped.
-	CreateService(fullInputName string) (BackgroundService, error)
-
 	// Creates builds a new Input instance from the given configuation, or returns
 	// an error if the configuation is invalid.
 	// The generated must not collect any data yet. The Beat will use the Test/Run

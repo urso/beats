@@ -9,8 +9,6 @@ import (
 )
 
 type Collection interface {
-	CreateService(prefix string) (BackgroundService, error)
-
 	Find(name string) (Extension, error)
 
 	Each(func(Extension) bool)
@@ -56,19 +54,6 @@ func ValidateCollection(c Collection) error {
 	}
 
 	return sderr.WrapAll(errs, "registry has multiple duplicate plugins")
-}
-
-func (l collectionList) CreateService(prefix string) (BackgroundService, error) {
-	var services []BackgroundService
-	for _, c := range l {
-		service, err := c.CreateService(prefix)
-		if err != nil {
-			return nil, err
-		}
-
-		services = append(services, service)
-	}
-	return CombineServices(services...), nil
 }
 
 func (l collectionList) Find(name string) (Extension, error) {
