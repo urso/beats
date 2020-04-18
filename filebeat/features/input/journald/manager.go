@@ -48,11 +48,6 @@ type managedInput struct {
 	input   CursorInput
 }
 
-func (cim *CursorInputManager) CreateService(fullInputName string) (input.BackgroundService, error) {
-	// TODO: create background service cleaning up old states
-	return nil, nil
-}
-
 func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
 	sources, inp, err := cim.Configure(config)
 	if err != nil {
