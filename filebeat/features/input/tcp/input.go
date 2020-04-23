@@ -9,6 +9,7 @@ import (
 	"time"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/filebeat/input/v2/tnsninput"
 	"github.com/elastic/beats/v7/filebeat/inputsource"
 	"github.com/elastic/beats/v7/filebeat/inputsource/tcp"
 	"github.com/elastic/beats/v7/libbeat/beat"
@@ -33,8 +34,8 @@ var plugin = input.Plugin{
 	Deprecated: false,
 	Info:       "TCP server",
 	Doc:        "The tcp input creates a TCP server and reads line delimited events",
-	Manager: input.StatelessInputManager{
-		Configure: func(cfg *common.Config) (input.StatelessInput, error) {
+	Manager: tnsninput.Manager{
+		Configure: func(cfg *common.Config) (tnsninput.Input, error) {
 			config := defaultConfig()
 			if err := cfg.Unpack(&config); err != nil {
 				return nil, err
