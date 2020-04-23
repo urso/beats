@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package journald
 
 import (
@@ -5,37 +22,50 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
+
+	"github.com/urso/sderr"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
-	"github.com/elastic/beats/v7/filebeat/input/v2/statestore"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/registry"
+
+	"github.com/elastic/go-concert"
+	"github.com/elastic/go-concert/chorus"
 	"github.com/elastic/go-concert/ctxtool"
 	"github.com/elastic/go-concert/unison"
-	"github.com/urso/sderr"
 )
 
 type CursorInputManager struct {
-	Logger       *logp.Logger
-	Registry     *registry.Registry
-	DefaultStore string
-	Type         string
-	Configure    func(cfg *common.Config) ([]Source, CursorInput, error)
+	Logger              *logp.Logger
+	Registry            *registry.Registry
+	DefaultStore        string
+	Type                string
+	DefaultCleanTimeout time.Duration
+	Configure           func(cfg *common.Config) ([]Source, CursorInput, error)
 
-	storeInitOnce  sync.Once
-	storeConnector *statestore.Connector
+	initOnce sync.Once
+
+	sessionMu sync.Mutex
+	sessions  map[string]*session
 }
 
 type CursorInput interface {
 	Name() string
 	Test(Source, input.TestContext) error
-	Run(input.Context, Source, Cursor, func(beat.Event, interface{}) error) error
+	Run(input.Context, Source, Cursor, Publisher) error
+}
+
+type Publisher interface {
+	Publish(event beat.Event, cursor interface{}) error
 }
 
 type Cursor struct {
-	res *statestore.Resource
+	session  *session
+	resource *resource
 }
 
 type Source interface {
@@ -43,28 +73,89 @@ type Source interface {
 }
 
 type managedInput struct {
-	manager *CursorInputManager
-	sources []Source
-	input   CursorInput
+	manager      *CursorInputManager
+	sources      []Source
+	input        CursorInput
+	cleanTimeout time.Duration
+}
+
+type cursorPublisher struct {
+	ctx    *input.Context
+	client beat.Client
+	cursor *Cursor
 }
 
 func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
+	cim.initOnce.Do(func() {
+		if cim.DefaultCleanTimeout <= 0 {
+			cim.DefaultCleanTimeout = 30 * time.Minute
+			cim.sessions = map[string]*session{}
+		}
+	})
+
+	settings := struct {
+		CleanTimeout time.Duration `config:"clean_timeout"`
+	}{CleanTimeout: cim.DefaultCleanTimeout}
+	if err := config.Unpack(&settings); err != nil {
+		return nil, err
+	}
+
 	sources, inp, err := cim.Configure(config)
 	if err != nil {
 		return nil, err
 	}
 
-	return &managedInput{cim, sources, inp}, nil
+	return &managedInput{
+		manager:      cim,
+		sources:      sources,
+		input:        inp,
+		cleanTimeout: settings.CleanTimeout,
+	}, nil
 }
 
-func (cim *CursorInputManager) openStore() (*statestore.Store, error) {
-	cim.storeInitOnce.Do(func() {
-		if cim.Logger == nil {
-			cim.Logger = logp.NewLogger("journald")
-		}
-		cim.storeConnector = statestore.NewConnector(cim.Logger, cim.Registry)
-	})
-	return cim.storeConnector.Open(cim.DefaultStore)
+func (cim *CursorInputManager) accessSession(name string) (*session, error) {
+	if name == "" {
+		name = cim.DefaultStore + "-" + cim.Type
+	}
+
+	cim.sessionMu.Lock()
+	defer cim.sessionMu.Unlock()
+
+	sess := cim.sessions[name]
+	if sess != nil {
+		sess.refCount.Retain()
+		return sess, nil
+	}
+
+	log := cim.Logger.With("store", name)
+
+	store, err := openStore(log, cim.Registry, name, cim.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Release()
+
+	closer := chorus.NewCloser(nil)
+
+	store.Retain()
+	sess = &session{name: name, log: log, owner: cim, closer: closer, store: store}
+
+	store.Retain()
+	cleaner := &cleaner{log: log, closer: closer, store: store}
+	go cleaner.run(1 * time.Minute) // TODO: how to configure. This is a global setting, that must not be configured per input
+
+	cim.sessions[name] = sess
+	return sess, nil
+}
+
+func (cim *CursorInputManager) releaseSession(sess *session, name string, counter *concert.RefCount) bool {
+	cim.sessionMu.Lock()
+	done := counter.Release()
+	if done {
+		delete(cim.sessions, name)
+	}
+	cim.sessionMu.Unlock()
+	return done
 }
 
 func (inp *managedInput) Name() string { return inp.input.Name() }
@@ -91,11 +182,11 @@ func (inp *managedInput) Run(
 	defer cancel()
 	ctx.Cancelation = cancelCtx
 
-	store, err := inp.manager.openStore()
+	session, err := inp.manager.accessSession("")
 	if err != nil {
 		sderr.Wrap(err, "failed to access the state store")
 	}
-	defer store.Close()
+	defer session.Release()
 
 	var grp unison.MultiErrGroup
 	for _, source := range inp.sources {
@@ -106,7 +197,7 @@ func (inp *managedInput) Run(
 			inpCtx.ID = ctx.ID + "::" + source.Name()
 			inpCtx.Logger = ctx.Logger.With("source", source.Name())
 
-			if err = inp.runSource(inpCtx, store, source, pipeline); err != nil {
+			if err = inp.runSource(inpCtx, session, source, pipeline); err != nil {
 				cancel()
 			}
 			return err
@@ -121,7 +212,7 @@ func (inp *managedInput) Run(
 
 func (inp *managedInput) runSource(
 	ctx input.Context,
-	store *statestore.Store,
+	session *session,
 	source Source,
 	pipeline beat.PipelineConnector,
 ) (err error) {
@@ -139,6 +230,7 @@ func (inp *managedInput) runSource(
 		Processing: beat.ProcessingConfig{
 			DynamicFields: ctx.Metadata,
 		},
+		ACKHandler: newInputACKHandler(ctx.Logger, inp.manager),
 	})
 	if err != nil {
 		return err
@@ -146,47 +238,54 @@ func (inp *managedInput) runSource(
 	defer client.Close()
 
 	// lock resource for exclusive access and create cursor
-	cursor, err := inp.lockCursor(ctx, store, source)
+	resource, err := session.Lock(ctx, fmt.Sprintf("%v::%v", inp.manager.Type, source.Name()))
 	if err != nil {
 		return err
 	}
-	defer cursor.res.Unlock()
+	defer resource.Unlock()
 
-	return inp.input.Run(ctx, source, cursor, func(event beat.Event, cursorUpd interface{}) error {
-		op, err := cursor.res.UpdateOp(cursorUpd)
-		if err != nil {
-			return err
+	// update clean timeout. If the resource is 'new' we will insert it into the registry now.
+	if resource.stored == false || inp.cleanTimeout != resource.state.Internal.TTL {
+		resource.state.Internal.TTL = inp.cleanTimeout
+		session.store.UpdateInternal(resource)
+	}
+
+	cursor := Cursor{session: session, resource: resource}
+	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
+	return inp.input.Run(ctx, source, cursor, publisher)
+}
+
+func (c *cursorPublisher) Publish(event beat.Event, cursorUpdate interface{}) error {
+	op, err := c.cursor.session.CreateUpdateOp(c.cursor.resource, cursorUpdate)
+	if err != nil {
+		return err
+	}
+
+	event.Private = op
+	c.client.Publish(event)
+	return c.ctx.Cancelation.Err()
+}
+
+func newInputACKHandler(log *logp.Logger, manager *CursorInputManager) beat.ACKer {
+	return acker.LastEventPrivateReporter(func(acked int, private interface{}) {
+		op, ok := private.(*updateOp)
+		if !ok {
+			log.Errorf("Wrong event type ACKed")
+		} else {
+			op.Execute()
 		}
-
-		event.Private = op
-		client.Publish(event)
-		return ctx.Cancelation.Err()
 	})
 }
 
-func (inp *managedInput) lockCursor(
-	ctx input.Context,
-	store *statestore.Store,
-	source Source,
-) (Cursor, error) {
-	log := ctx.Logger
+func (c Cursor) IsNew() bool { return c.resource.IsNew() }
 
-	cursorKey := fmt.Sprintf("%v::%v", inp.manager.Type, source.Name())
-	res := store.Access(statestore.ResourceKey(cursorKey))
-	if !res.TryLock() {
-		log.Infof("Resource '%v' currently in use, waiting...", cursorKey)
-		err := res.LockContext(ctx.Cancelation)
-		if err != nil {
-			log.Infof("Input for resource '%v' has been stopped while waiting", cursorKey)
-			return Cursor{}, err
-		}
+func (c Cursor) Unpack(to interface{}) error {
+	if c.IsNew() {
+		return nil
 	}
-	return Cursor{res}, nil
+	return c.resource.UnpackCursor(to)
 }
 
-func (c Cursor) Unpack(to interface{}) error   { return c.res.Read(to) }
-func (c Cursor) Migrate(val interface{}) error { return c.res.Replace(val) }
-func (c Cursor) IsNew() bool {
-	has, err := c.res.Has()
-	return !has || err != nil
+func (c Cursor) Migrate(val interface{}) error {
+	return c.session.store.Migrate(c.resource, val)
 }
