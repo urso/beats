@@ -18,7 +18,6 @@ type Addon interface {
 }
 
 var _ Addon = (*Registry)(nil)
-var _ Collection = (*Registry)(nil)
 
 // NewRegistry creates a new registry from the given registries and plugins.
 func NewRegistry(extensions ...Addon) *Registry {
@@ -50,7 +49,7 @@ func (r *Registry) Names() []string {
 
 // Each iterates over all known plugins accessible using this registry.
 // The iteration stops when fn return false.
-func (r *Registry) Each(fn func(Extension) (cont bool)) {
+func (r *Registry) Each(fn func(Plugin) (cont bool)) {
 	r.each(func(p Plugin) bool { return fn(p) })
 }
 
@@ -74,10 +73,10 @@ func (r *Registry) each(fn func(Plugin) bool) bool {
 
 // Find searches for an existing extension for the given name. It returns
 // an error if the extension does not exist.
-func (c *Registry) Find(name string) (Extension, error) {
+func (c *Registry) Find(name string) (Plugin, error) {
 	plugin, ok := c.find(name)
 	if !ok {
-		return nil, &LoaderError{Name: name, Reason: ErrUnknown}
+		return plugin, &LoaderError{Name: name, Reason: ErrUnknown}
 	}
 	return plugin, nil
 }

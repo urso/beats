@@ -17,7 +17,6 @@ type Plugin struct {
 }
 
 var _ Addon = Plugin{}
-var _ Extension = Plugin{}
 
 func (p Plugin) Details() feature.Details {
 	return feature.Details{
