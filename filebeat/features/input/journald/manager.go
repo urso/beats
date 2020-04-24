@@ -98,7 +98,7 @@ func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error
 
 func (cim *CursorInputManager) accessSession(name string) (*session, error) {
 	if name == "" {
-		name = cim.DefaultStore + "-" + cim.Type
+		name = cim.DefaultStore
 	}
 
 	cim.sessionMu.Lock()
