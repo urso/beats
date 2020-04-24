@@ -276,16 +276,19 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 	}
 
 	inputsLogger := logp.NewLogger("input")
-	v2InputLoader, err := v2.NewLoader(fbossinputs.Inputs(b.Info, inputsLogger, stateStore), "type", "")
+	v2Inputs := fbossinputs.Inputs(b.Info, inputsLogger, stateStore)
+	v2InputLoader, err := v2.NewLoader(v2Inputs, "type", "")
 	if err != nil {
 		panic(err) // loader detected invalid state.
 	}
-	inputLoader := channel.RunnerFactoryWithCommonInputSettings(b.Info,
-		compat.Combine(
-			compat.RunnerFactory(inputsLogger, b.Info, v2InputLoader),
-			input.NewRunnerFactory(pipelineConnector, registrar, fb.done),
-		),
-	)
+
+	v2Inputs.Each(func(p v2.Plugin) { p.Manager.Start(v2.ModeRun) })
+	defer v2Inputs.Each(func(p v2.Plugin) { p.Manager.Stop() })
+
+	inputLoader := channel.RunnerFactoryWithCommonInputSettings(b.Info, compat.Combine(
+		compat.RunnerFactory(inputsLogger, b.Info, v2InputLoader),
+		input.NewRunnerFactory(pipelineConnector, registrar, fb.done),
+	))
 	moduleLoader := fileset.NewFactory(inputLoader, b.Info, pipelineLoaderFactory, config.OverwritePipelines)
 
 	crawler, err := newCrawler(inputLoader, moduleLoader, config.Inputs, fb.done, *once)

@@ -10,13 +10,13 @@ import (
 	"github.com/urso/sderr"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
+	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
 
-	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/chorus"
 	"github.com/elastic/go-concert/ctxtool"
 	"github.com/elastic/go-concert/unison"
@@ -30,11 +30,10 @@ type CursorInputManager struct {
 	DefaultCleanTimeout time.Duration
 	Configure           func(cfg *common.Config) ([]Source, CursorInput, error)
 
-	initOnce sync.Once
-
-	sessionMu sync.Mutex
-	session   *session
-	closer    *chorus.Closer
+	closer  *chorus.Closer
+	wg      sync.WaitGroup
+	session *session
+	store   *store
 }
 
 type CursorInput interface {
@@ -69,13 +68,54 @@ type cursorPublisher struct {
 	cursor *Cursor
 }
 
-func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
-	cim.initOnce.Do(func() {
-		if cim.DefaultCleanTimeout <= 0 {
-			cim.DefaultCleanTimeout = 30 * time.Minute
-		}
-	})
+func (cim *CursorInputManager) init() error {
+	if cim.DefaultCleanTimeout <= 0 {
+		cim.DefaultCleanTimeout = 30 * time.Minute
+	}
 
+	log := cim.Logger.With("statestore", cim.DefaultStore)
+
+	closer := chorus.NewCloser(nil)
+
+	store, err := openStore(log, cim.Registry, cim.DefaultStore, cim.Type)
+	if err != nil {
+		return err
+	}
+
+	cleaner := &cleaner{log: log, closer: closer, store: store}
+
+	cim.wg.Add(1)
+	go func() {
+		defer cim.wg.Done()
+		cleaner.run(1 * time.Minute) // TODO: how to configure. This is a global setting, that must not be configured per input
+	}()
+
+	cim.session = newSession(store)
+	cim.closer = closer
+	cim.store = store
+
+	return nil
+}
+
+func (cim *CursorInputManager) Start(mode v2.Mode) error {
+	cim.init()
+
+	if mode != v2.ModeRun {
+		return nil
+	}
+
+	return cim.init()
+}
+
+func (cim *CursorInputManager) Stop() {
+	defer cim.store.Close()
+
+	cim.closer.Close()
+	cim.session.Close()
+	cim.wg.Wait()
+}
+
+func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
 	settings := struct {
 		CleanTimeout time.Duration `config:"clean_timeout"`
 	}{CleanTimeout: cim.DefaultCleanTimeout}
@@ -96,49 +136,21 @@ func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error
 	}, nil
 }
 
-func (cim *CursorInputManager) accessSession() (*session, error) {
-	name := cim.DefaultStore
+// Lock locks a key for exclusive access and returns an resource that can be used to modify
+// the cursor state and unlock the key.
+func (cim *CursorInputManager) lock(ctx input.Context, key string) (*resource, error) {
+	log := ctx.Logger
 
-	cim.sessionMu.Lock()
-	defer cim.sessionMu.Unlock()
-
-	if s := cim.session; s != nil {
-		s.Retain()
-		return s, nil
+	resource := cim.store.Find(key, true)
+	if !resource.lock.TryLock() {
+		log.Infof("Resource '%v' currently in use, waiting...", key)
+		err := resource.lock.LockContext(ctx.Cancelation)
+		if err != nil {
+			log.Infof("Input for resource '%v' has been stopped while waiting", key)
+			return nil, err
+		}
 	}
-
-	log := cim.Logger.With("store", name)
-	store, err := openStore(log, cim.Registry, name, cim.Type)
-	if err != nil {
-		return nil, err
-	}
-	defer store.Release()
-
-	closer := chorus.NewCloser(nil)
-
-	store.Retain()
-	sess := &session{log: log, owner: cim, store: store}
-
-	store.Retain()
-	cleaner := &cleaner{log: log, closer: closer, store: store}
-	go cleaner.run(1 * time.Minute) // TODO: how to configure. This is a global setting, that must not be configured per input
-
-	cim.session = sess
-	cim.closer = closer
-	return sess, nil
-}
-
-func (cim *CursorInputManager) releaseSession(sess *session, counter *concert.RefCount) bool {
-	cim.sessionMu.Lock()
-	defer cim.sessionMu.Unlock()
-
-	done := counter.Release()
-	if done {
-		cim.closer.Close()
-		cim.closer = nil
-		cim.session = nil
-	}
-	return done
+	return resource, nil
 }
 
 func (inp *managedInput) Name() string { return inp.input.Name() }
@@ -165,11 +177,10 @@ func (inp *managedInput) Run(
 	defer cancel()
 	ctx.Cancelation = cancelCtx
 
-	session, err := inp.manager.accessSession()
+	session := inp.manager.session
 	if err != nil {
 		sderr.Wrap(err, "failed to access the state store")
 	}
-	defer session.Release()
 
 	var grp unison.MultiErrGroup
 	for _, source := range inp.sources {
@@ -221,7 +232,7 @@ func (inp *managedInput) runSource(
 	defer client.Close()
 
 	// lock resource for exclusive access and create cursor
-	resource, err := session.Lock(ctx, fmt.Sprintf("%v::%v", inp.manager.Type, source.Name()))
+	resource, err := inp.manager.lock(ctx, fmt.Sprintf("%v::%v", inp.manager.Type, source.Name()))
 	if err != nil {
 		return err
 	}

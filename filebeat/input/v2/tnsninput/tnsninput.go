@@ -45,14 +45,17 @@ type statelessInputInst struct {
 
 var _ v2.InputManager = Manager{}
 
+func (m Manager) Start(_ v2.Mode) error { return nil }
+func (m Manager) Stop()                 {}
+
 // Create configures a transient input and ensures that the final input can be used with
 // with the filebeat input architecture.
-func (sim Manager) Create(cfg *common.Config) (v2.Input, error) {
-	si, err := sim.Configure(cfg)
+func (m Manager) Create(cfg *common.Config) (v2.Input, error) {
+	inp, err := m.Configure(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return statelessInputInst{si}, nil
+	return statelessInputInst{inp}, nil
 }
 
 func (si statelessInputInst) Name() string { return si.input.Name() }

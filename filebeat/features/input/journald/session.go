@@ -18,22 +18,17 @@
 package journald
 
 import (
+	"sync"
 	"time"
-
-	input "github.com/elastic/beats/v7/filebeat/input/v2"
-	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/go-concert"
 )
 
 type session struct {
-	log      *logp.Logger
-	owner    sessionOwner
-	refCount concert.RefCount
-	store    *store
-}
+	store *store
 
-type sessionOwner interface {
-	releaseSession(s *session, counter *concert.RefCount) bool
+	mu       sync.Mutex
+	cond     *sync.Cond
+	closed   bool
+	activity uint
 }
 
 type updateOp struct {
@@ -44,39 +39,21 @@ type updateOp struct {
 	delta     interface{}
 }
 
-func (s *session) Retain() {
-	s.refCount.Retain()
+func newSession(store *store) *session {
+	s := &session{store: store}
+	s.cond = sync.NewCond(&s.mu)
+	return s
 }
 
-func (s *session) Release() {
-	var done bool
-	if s.owner != nil {
-		done = s.owner.releaseSession(s, &s.refCount)
-	} else {
-		done = s.refCount.Release()
-	}
+// Close waits for updates that are currently executed, and stops all future update events.
+func (s *session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if done {
-		s.store.Release()
-		s.store = nil
+	s.closed = true
+	for s.activity > 0 {
+		s.cond.Wait()
 	}
-}
-
-// Lock locks a key for exclusive access and returns an resource that can be used to modify
-// the cursor state and unlock the key.
-func (s *session) Lock(ctx input.Context, key string) (*resource, error) {
-	log := ctx.Logger
-
-	resource := s.store.Find(key, true)
-	if !resource.lock.TryLock() {
-		log.Infof("Resource '%v' currently in use, waiting...", key)
-		err := resource.lock.LockContext(ctx.Cancelation)
-		if err != nil {
-			log.Infof("Input for resource '%v' has been stopped while waiting", key)
-			return nil, err
-		}
-	}
-	return resource, nil
 }
 
 func (s *session) CreateUpdateOp(resource *resource, updates interface{}) (*updateOp, error) {
@@ -87,7 +64,6 @@ func (s *session) CreateUpdateOp(resource *resource, updates interface{}) (*upda
 	}
 
 	resource.Retain()
-	s.Retain()
 
 	resource.state.Internal.Updated = ts
 	return &updateOp{
@@ -98,15 +74,33 @@ func (s *session) CreateUpdateOp(resource *resource, updates interface{}) (*upda
 	}, nil
 }
 
-func (s *session) ApplyUpdateOp(op *updateOp) {
-	s.store.UpdateCursor(op.resource, op.timestamp, op.delta)
+func (s *session) updateBegin() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.activity++
+	return true
+}
+
+func (s *session) updateEnd() {
+	s.mu.Lock()
+	s.activity--
+	if s.closed && s.activity == 0 {
+		s.cond.Signal()
+	}
+	s.mu.Unlock()
 }
 
 func (op *updateOp) Execute() {
 	session, resource := op.session, op.resource
-	defer session.Release()
 	defer resource.Release()
 
-	session.ApplyUpdateOp(op)
+	if session.updateBegin() {
+		defer session.updateEnd()
+		session.store.UpdateCursor(op.resource, op.timestamp, op.delta)
+	}
+
 	*op = updateOp{}
 }

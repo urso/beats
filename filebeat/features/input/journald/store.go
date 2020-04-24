@@ -26,7 +26,6 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
-	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
 )
@@ -38,7 +37,6 @@ import (
 // will be released and closed.
 type store struct {
 	log             *logp.Logger
-	refCount        concert.RefCount
 	persistentStore *statestore.Store
 	ephemeralStore  *states
 }
@@ -142,14 +140,10 @@ func openStore(log *logp.Logger, reg *statestore.Registry, name, prefix string) 
 	}, nil
 }
 
-func (s *store) Retain() { s.refCount.Retain() }
-
-func (s *store) Release() {
-	if s.refCount.Release() {
-		err := s.persistentStore.Close()
-		if err != nil {
-			s.log.Errorf("Closing registry store did report an error: %+v", err)
-		}
+func (s *store) Close() {
+	err := s.persistentStore.Close()
+	if err != nil {
+		s.log.Errorf("Closing registry store did report an error: %+v", err)
 	}
 }
 

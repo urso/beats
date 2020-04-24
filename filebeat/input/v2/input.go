@@ -9,6 +9,10 @@ import (
 // InputManager creates and maintains actions and background processes for an
 // input type.
 type InputManager interface {
+	Start(m Mode) error
+
+	Stop()
+
 	// Creates builds a new Input instance from the given configuation, or returns
 	// an error if the configuation is invalid.
 	// The generated must not collect any data yet. The Beat will use the Test/Run
