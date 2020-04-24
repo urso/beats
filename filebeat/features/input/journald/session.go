@@ -23,20 +23,17 @@ import (
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/go-concert"
-	"github.com/elastic/go-concert/chorus"
 )
 
 type session struct {
-	name     string
 	log      *logp.Logger
 	owner    sessionOwner
 	refCount concert.RefCount
-	closer   *chorus.Closer
 	store    *store
 }
 
 type sessionOwner interface {
-	releaseSession(s *session, name string, counter *concert.RefCount) bool
+	releaseSession(s *session, counter *concert.RefCount) bool
 }
 
 type updateOp struct {
@@ -54,15 +51,13 @@ func (s *session) Retain() {
 func (s *session) Release() {
 	var done bool
 	if s.owner != nil {
-		done = s.owner.releaseSession(s, s.name, &s.refCount)
+		done = s.owner.releaseSession(s, &s.refCount)
 	} else {
 		done = s.refCount.Release()
 	}
 
 	if done {
-		s.closer.Close()
 		s.store.Release()
-		s.closer = nil
 		s.store = nil
 	}
 }

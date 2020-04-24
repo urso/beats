@@ -33,7 +33,8 @@ type CursorInputManager struct {
 	initOnce sync.Once
 
 	sessionMu sync.Mutex
-	sessions  map[string]*session
+	session   *session
+	closer    *chorus.Closer
 }
 
 type CursorInput interface {
@@ -73,7 +74,6 @@ func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error
 		if cim.DefaultCleanTimeout <= 0 {
 			cim.DefaultCleanTimeout = 30 * time.Minute
 		}
-		cim.sessions = map[string]*session{}
 	})
 
 	settings := struct {
@@ -96,22 +96,18 @@ func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error
 	}, nil
 }
 
-func (cim *CursorInputManager) accessSession(name string) (*session, error) {
-	if name == "" {
-		name = cim.DefaultStore
-	}
+func (cim *CursorInputManager) accessSession() (*session, error) {
+	name := cim.DefaultStore
 
 	cim.sessionMu.Lock()
 	defer cim.sessionMu.Unlock()
 
-	sess := cim.sessions[name]
-	if sess != nil {
-		sess.refCount.Retain()
-		return sess, nil
+	if s := cim.session; s != nil {
+		s.Retain()
+		return s, nil
 	}
 
 	log := cim.Logger.With("store", name)
-
 	store, err := openStore(log, cim.Registry, name, cim.Type)
 	if err != nil {
 		return nil, err
@@ -121,23 +117,27 @@ func (cim *CursorInputManager) accessSession(name string) (*session, error) {
 	closer := chorus.NewCloser(nil)
 
 	store.Retain()
-	sess = &session{name: name, log: log, owner: cim, closer: closer, store: store}
+	sess := &session{log: log, owner: cim, store: store}
 
 	store.Retain()
 	cleaner := &cleaner{log: log, closer: closer, store: store}
 	go cleaner.run(1 * time.Minute) // TODO: how to configure. This is a global setting, that must not be configured per input
 
-	cim.sessions[name] = sess
+	cim.session = sess
+	cim.closer = closer
 	return sess, nil
 }
 
-func (cim *CursorInputManager) releaseSession(sess *session, name string, counter *concert.RefCount) bool {
+func (cim *CursorInputManager) releaseSession(sess *session, counter *concert.RefCount) bool {
 	cim.sessionMu.Lock()
+	defer cim.sessionMu.Unlock()
+
 	done := counter.Release()
 	if done {
-		delete(cim.sessions, name)
+		cim.closer.Close()
+		cim.closer = nil
+		cim.session = nil
 	}
-	cim.sessionMu.Unlock()
 	return done
 }
 
@@ -165,7 +165,7 @@ func (inp *managedInput) Run(
 	defer cancel()
 	ctx.Cancelation = cancelCtx
 
-	session, err := inp.manager.accessSession("")
+	session, err := inp.manager.accessSession()
 	if err != nil {
 		sderr.Wrap(err, "failed to access the state store")
 	}
