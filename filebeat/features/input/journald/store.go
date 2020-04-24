@@ -25,7 +25,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/atomic"
 	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/registry"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
@@ -39,7 +39,7 @@ import (
 type store struct {
 	log             *logp.Logger
 	refCount        concert.RefCount
-	persistentStore *registry.Store
+	persistentStore *statestore.Store
 	ephemeralStore  *states
 }
 
@@ -120,7 +120,7 @@ type (
 	}
 )
 
-func openStore(log *logp.Logger, reg *registry.Registry, name, prefix string) (*store, error) {
+func openStore(log *logp.Logger, reg *statestore.Registry, name, prefix string) (*store, error) {
 	ok := false
 
 	persistentStore, err := reg.Get(name)
@@ -163,8 +163,8 @@ func (s *store) UpdateInternal(resource *resource) {
 		data.Updated = time.Now()
 	}
 
-	err := s.persistentStore.Update(func(tx *registry.Tx) error {
-		return tx.Update(registry.Key(resource.key), registryStateUpdateInternal{
+	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
+		return tx.Update(statestore.Key(resource.key), registryStateUpdateInternal{
 			Internal: data,
 		})
 	})
@@ -183,8 +183,8 @@ func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates in
 		Cursor:   updates,
 	}
 
-	key := registry.Key(resource.key)
-	err := s.persistentStore.Update(func(tx *registry.Tx) error {
+	key := statestore.Key(resource.key)
+	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
 		if !resource.internalInSync {
 			internalUpdCommand := registryStateUpdateInternal{Internal: resource.state.Internal}
 			if err := tx.Update(key, internalUpdCommand); err != nil {
@@ -207,8 +207,8 @@ func (s *store) Migrate(resource *resource, value interface{}) error {
 		return sderr.Wrap(err, "failed to serialized state")
 	}
 
-	err := s.persistentStore.Update(func(tx *registry.Tx) error {
-		return tx.Set(registry.Key(resource.key), value)
+	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
+		return tx.Set(statestore.Key(resource.key), value)
 	})
 	if err != nil {
 		return sderr.Wrap(err, "failed to set key %{key} to new migrated value: %v", resource.key, value)
@@ -279,15 +279,15 @@ func (e *resource) UpdateCursor(val interface{}) error {
 	return typeconv.Convert(&e.state.Cursor, val)
 }
 
-func readStates(log *logp.Logger, store *registry.Store, prefix string) (*states, error) {
+func readStates(log *logp.Logger, store *statestore.Store, prefix string) (*states, error) {
 	keyPrefix := prefix + "::"
 	states := &states{
 		table: map[string]*resource{},
 	}
 
 	// load 'local' states into memory
-	err := store.View(func(tx *registry.Tx) error {
-		return tx.Each(func(k registry.Key, dec registry.ValueDecoder) (bool, error) {
+	err := store.View(func(tx *statestore.Tx) error {
+		return tx.Each(func(k statestore.Key, dec statestore.ValueDecoder) (bool, error) {
 			if !strings.HasPrefix(string(k), keyPrefix) {
 				return true, nil
 			}

@@ -29,7 +29,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/registry"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/urso/sderr"
 )
 
@@ -54,7 +54,7 @@ const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
 
 const pluginName = "journald"
 
-func Plugin(log *logp.Logger, reg *registry.Registry, defaultStore string) input.Plugin {
+func Plugin(log *logp.Logger, reg *statestore.Registry, defaultStore string) input.Plugin {
 	return input.Plugin{
 		Name:       pluginName,
 		Stability:  feature.Beta,

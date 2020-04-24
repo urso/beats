@@ -14,7 +14,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/acker"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/registry"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 
 	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/chorus"
@@ -24,7 +24,7 @@ import (
 
 type CursorInputManager struct {
 	Logger              *logp.Logger
-	Registry            *registry.Registry
+	Registry            *statestore.Registry
 	DefaultStore        string
 	Type                string
 	DefaultCleanTimeout time.Duration

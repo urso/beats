@@ -27,7 +27,7 @@ import (
 	"github.com/elastic/beats/v7/filebeat/input/file"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/monitoring"
-	"github.com/elastic/beats/v7/libbeat/registry"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 )
 
 type Registrar struct {
@@ -40,8 +40,8 @@ type Registrar struct {
 	wg   sync.WaitGroup
 
 	// state storage
-	states       *file.States    // Map with all file paths inside and the corresponding state
-	store        *registry.Store // Store keeps states in memory and on disk
+	states       *file.States      // Map with all file paths inside and the corresponding state
+	store        *statestore.Store // Store keeps states in memory and on disk
 	flushTimeout time.Duration
 
 	gcEnabled, gcRequired bool
@@ -62,7 +62,7 @@ var (
 
 // New creates a new Registrar instance, updating the registry file on
 // `file.State` updates. New fails if the file can not be opened or created.
-func New(stateStore *registry.Registry, out successLogger, flushTimeout time.Duration) (*Registrar, error) {
+func New(stateStore *statestore.Registry, out successLogger, flushTimeout time.Duration) (*Registrar, error) {
 	store, err := stateStore.Get("filebeat")
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func (r *Registrar) Run() {
 		case states := <-directIn:
 			// no flush timeout configured. Directly update registry
 			r.onEvents(states)
-			err := r.store.Update(func(tx *registry.Tx) error {
+			err := r.store.Update(func(tx *statestore.Tx) error {
 				writeStateUpdates(tx, states)
 				return nil
 			})
@@ -187,7 +187,7 @@ func (r *Registrar) Run() {
 
 		case <-flushC:
 			timer.Stop()
-			err := r.store.Update(func(tx *registry.Tx) error {
+			err := r.store.Update(func(tx *statestore.Tx) error {
 				writeStateUpdates(tx, pending)
 				return nil
 			})
@@ -204,7 +204,7 @@ func (r *Registrar) Run() {
 	}
 }
 
-func (r *Registrar) commit(tx *registry.Tx) error {
+func (r *Registrar) commit(tx *statestore.Tx) error {
 	defer tx.Close()
 
 	// First clean up states
@@ -257,7 +257,7 @@ func (r *Registrar) onEvents(states []file.State) {
 // registry can be gc'ed in the future. If no potential removable state is found,
 // the gcEnabled flag is set to false, indicating the current registrar state being
 // stable. New registry update events can re-enable state gc'ing.
-func (r *Registrar) gcStates(tx *registry.Tx) {
+func (r *Registrar) gcStates(tx *statestore.Tx) {
 	if !r.gcRequired {
 		return
 	}
@@ -265,7 +265,7 @@ func (r *Registrar) gcStates(tx *registry.Tx) {
 	beforeCount := r.states.Count()
 	cleanedStates, pendingClean := r.states.CleanupWith(func(id string) {
 		// TODO: report error
-		tx.Remove(registry.Key(id))
+		tx.Remove(statestore.Key(id))
 	})
 	statesCleanup.Add(int64(cleanedStates))
 
@@ -288,11 +288,11 @@ func (r *Registrar) processEventStates(states []file.State) {
 	}
 }
 
-func readStatesFrom(store *registry.Store) ([]file.State, error) {
+func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 	var states []file.State
 
-	err := store.View(func(tx *registry.Tx) error {
-		return tx.Each(func(k registry.Key, v registry.ValueDecoder) (bool, error) {
+	err := store.View(func(tx *statestore.Tx) error {
+		return tx.Each(func(k statestore.Key, v statestore.ValueDecoder) (bool, error) {
 			var st file.State
 
 			// try to decode. Ingore faulty/incompatible values.
@@ -316,9 +316,9 @@ func readStatesFrom(store *registry.Store) ([]file.State, error) {
 	return states, nil
 }
 
-func writeStateUpdates(tx *registry.Tx, states []file.State) error {
+func writeStateUpdates(tx *statestore.Tx, states []file.State) error {
 	for i := range states {
-		if err := tx.Set(registry.Key(states[i].ID()), states[i]); err != nil {
+		if err := tx.Set(statestore.Key(states[i].ID()), states[i]); err != nil {
 			return err
 		}
 	}

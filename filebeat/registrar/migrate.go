@@ -31,8 +31,8 @@ import (
 	helper "github.com/elastic/beats/v7/libbeat/common/file"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/paths"
-	"github.com/elastic/beats/v7/libbeat/registry"
-	"github.com/elastic/beats/v7/libbeat/registry/backend/memlog"
+	"github.com/elastic/beats/v7/libbeat/statestore"
+	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
 )
 
 type registryVersion string
@@ -173,7 +173,7 @@ func initVersion0Registry(regHome string, perm os.FileMode) error {
 
 // migrateVersion1 migrates the filebeat registry from version 0 to version 1
 // only. Version 1 is based on the implementation of version 1 in
-// libbeat/registry/backend/memlog.
+// libbeat/statestore/backend/memlog.
 func migrateVersion1(home, regHome string, perm os.FileMode) error {
 	logp.Info("Migrate registry version 0 to version 1")
 
@@ -212,7 +212,7 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 		return errors.Wrap(err, "failed to create new registry backend")
 	}
 
-	reg := registry.New(registryBackend)
+	reg := statestore.NewRegistry(registryBackend)
 	defer reg.Close()
 
 	store, err := reg.Get("filebeat")
@@ -221,7 +221,7 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 	}
 	defer store.Close()
 
-	err = store.Update(func(tx *registry.Tx) error {
+	err = store.Update(func(tx *statestore.Tx) error {
 		return writeStateUpdates(tx, states)
 	})
 	if err != nil {

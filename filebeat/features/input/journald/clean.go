@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/registry"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/go-concert/chorus"
 )
 
@@ -109,13 +109,13 @@ func (c *cleaner) cleanup(started time.Time) {
 
 	// try to delete entries from the registry and internal state storage
 	if numStored > 0 {
-		err := c.store.persistentStore.Update(func(tx *registry.Tx) error {
+		err := c.store.persistentStore.Update(func(tx *statestore.Tx) error {
 			for k, stored := range keys {
 				if !stored {
 					continue
 				}
 
-				if err := tx.Remove(registry.Key(k)); err != nil {
+				if err := tx.Remove(statestore.Key(k)); err != nil {
 					return err
 				}
 			}

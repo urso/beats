@@ -47,8 +47,8 @@ import (
 	"github.com/elastic/beats/v7/libbeat/outputs/elasticsearch"
 	"github.com/elastic/beats/v7/libbeat/paths"
 	"github.com/elastic/beats/v7/libbeat/publisher/pipetool"
-	"github.com/elastic/beats/v7/libbeat/registry"
-	"github.com/elastic/beats/v7/libbeat/registry/backend/memlog"
+	"github.com/elastic/beats/v7/libbeat/statestore"
+	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
 
 	_ "github.com/elastic/beats/v7/filebeat/include"
 
@@ -405,7 +405,7 @@ func (fb *Filebeat) Stop() {
 	close(fb.done)
 }
 
-func openStateStore(cfg config.Registry) (*registry.Registry, error) {
+func openStateStore(cfg config.Registry) (*statestore.Registry, error) {
 	memlog, err := memlog.New(memlog.Settings{
 		Root:     paths.Resolve(paths.Data, cfg.Path),
 		FileMode: cfg.Permissions,
@@ -413,7 +413,7 @@ func openStateStore(cfg config.Registry) (*registry.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return registry.New(memlog), nil
+	return statestore.NewRegistry(memlog), nil
 }
 
 // Create a new pipeline loader (es client) factory
