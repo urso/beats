@@ -11,6 +11,7 @@ import (
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/filebeat/input/v2/tnsninput"
 	"github.com/elastic/beats/v7/filebeat/inputsource"
+	netcommon "github.com/elastic/beats/v7/filebeat/inputsource/common"
 	"github.com/elastic/beats/v7/filebeat/inputsource/tcp"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -40,13 +41,13 @@ var plugin = input.Plugin{
 			if err := cfg.Unpack(&config); err != nil {
 				return nil, err
 			}
-			return newServer(config)
+			return configure(config)
 		},
 	},
 }
 
-func newServer(config config) (*server, error) {
-	splitFunc := tcp.SplitFunc([]byte(config.LineDelimiter))
+func configure(config config) (*server, error) {
+	splitFunc := netcommon.SplitFunc([]byte(config.LineDelimiter))
 	if splitFunc == nil {
 		return nil, fmt.Errorf("unable to create splitFunc for delimiter %s", config.LineDelimiter)
 	}
@@ -84,7 +85,7 @@ func (s *server) Run(ctx input.Context, publish func(beat.Event)) error {
 		event := createEvent(data, metadata)
 		publish(event)
 	}
-	factory := tcp.SplitHandlerFactory(cb, s.splitFunc)
+	factory := netcommon.SplitHandlerFactory(netcommon.FamilyTCP, ctx.Logger, tcp.MetadataCallback, cb, s.splitFunc)
 	server, err := tcp.New(&s.config.Config, factory)
 	if err != nil {
 		return err
