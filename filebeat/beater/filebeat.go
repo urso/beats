@@ -49,6 +49,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/publisher/pipetool"
 	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
+	"github.com/elastic/go-concert/unison"
 
 	_ "github.com/elastic/beats/v7/filebeat/include"
 
@@ -282,8 +283,12 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 		panic(err) // loader detected invalid state.
 	}
 
-	v2Inputs.Each(func(p v2.Plugin) { p.Manager.Start(v2.ModeRun) })
-	defer v2Inputs.Each(func(p v2.Plugin) { p.Manager.Stop() })
+	var inputTaskGroup unison.TaskGroup
+	defer inputTaskGroup.Stop()
+	if err := v2InputLoader.Init(&inputTaskGroup, v2.ModeRun); err != nil {
+		logp.Err("Failed to initialize the input managers: %v", err)
+		return err
+	}
 
 	inputLoader := channel.RunnerFactoryWithCommonInputSettings(b.Info, compat.Combine(
 		compat.RunnerFactory(inputsLogger, b.Info, v2InputLoader),
