@@ -26,6 +26,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
+	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
 )
@@ -37,6 +38,7 @@ import (
 // will be released and closed.
 type store struct {
 	log             *logp.Logger
+	refCount        concert.RefCount
 	persistentStore *statestore.Store
 	ephemeralStore  *states
 }
@@ -118,10 +120,10 @@ type (
 	}
 )
 
-func openStore(log *logp.Logger, reg *statestore.Registry, name, prefix string) (*store, error) {
+func openStore(log *logp.Logger, statestore StateStore, prefix string) (*store, error) {
 	ok := false
 
-	persistentStore, err := reg.Get(name)
+	persistentStore, err := statestore.Access()
 	if err != nil {
 		return nil, err
 	}
@@ -134,18 +136,21 @@ func openStore(log *logp.Logger, reg *statestore.Registry, name, prefix string) 
 
 	ok = true
 	return &store{
-		log:             log,
+		log: log,
+		refCount: concert.RefCount{
+			Action: func(_ error) {
+				if err := persistentStore.Close(); err != nil {
+					log.Errorf("Closing registry store did report an error: %+v", err)
+				}
+			},
+		},
 		persistentStore: persistentStore,
 		ephemeralStore:  states,
 	}, nil
 }
 
-func (s *store) Close() {
-	err := s.persistentStore.Close()
-	if err != nil {
-		s.log.Errorf("Closing registry store did report an error: %+v", err)
-	}
-}
+func (s *store) Retain()  { s.refCount.Retain() }
+func (s *store) Release() { s.refCount.Release() }
 
 func (s *store) Find(key string, create bool) *resource {
 	return s.ephemeralStore.Find(key, create)

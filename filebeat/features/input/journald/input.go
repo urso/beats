@@ -25,6 +25,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/filebeat/input/v2/exclinput"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
@@ -61,12 +62,15 @@ func Plugin(log *logp.Logger, reg *statestore.Registry, defaultStore string) inp
 		Deprecated: false,
 		Info:       "journald input",
 		Doc:        "The journald input collects logs from the local journald service",
-		Manager: &CursorInputManager{
-			Logger:       log,
-			Registry:     reg,
-			DefaultStore: defaultStore,
-			Type:         pluginName,
-			Configure:    configure,
+		Manager: &exclinput.CursorInputManager{
+			Logger: log,
+			StateStore: &beatsStore{
+				registry:        reg,
+				name:            defaultStore,
+				cleanupInterval: 1 * time.Minute,
+			},
+			Type:      pluginName,
+			Configure: configure,
 		},
 	}
 }
@@ -77,7 +81,7 @@ var cursorVersion = 1
 
 func (p pathSource) Name() string { return string(p) }
 
-func configure(cfg *common.Config) ([]Source, CursorInput, error) {
+func configure(cfg *common.Config) ([]exclinput.Source, exclinput.CursorInput, error) {
 	config := defaultConfig()
 	if err := cfg.Unpack(&config); err != nil {
 		return nil, nil, err
@@ -88,7 +92,7 @@ func configure(cfg *common.Config) ([]Source, CursorInput, error) {
 		paths = []string{localSystemJournalID}
 	}
 
-	sources := make([]Source, len(paths))
+	sources := make([]exclinput.Source, len(paths))
 	for i, p := range paths {
 		sources[i] = pathSource(p)
 	}
@@ -105,7 +109,7 @@ func configure(cfg *common.Config) ([]Source, CursorInput, error) {
 
 func (inp *journald) Name() string { return pluginName }
 
-func (inp *journald) Test(src Source, ctx input.TestContext) error {
+func (inp *journald) Test(src exclinput.Source, ctx input.TestContext) error {
 	// 1. check if we can open the journal
 	j, err := openJournal(src.Name())
 	if err != nil {
@@ -123,9 +127,9 @@ func (inp *journald) Test(src Source, ctx input.TestContext) error {
 
 func (inp *journald) Run(
 	ctx input.Context,
-	src Source,
-	cursor Cursor,
-	publisher Publisher,
+	src exclinput.Source,
+	cursor exclinput.Cursor,
+	publisher exclinput.Publisher,
 ) error {
 	log := ctx.Logger.With("path", src.Name())
 	checkpoint := initCheckpoint(log, cursor)
@@ -169,7 +173,7 @@ func (inp *journald) Run(
 	}
 }
 
-func initCheckpoint(log *logp.Logger, c Cursor) checkpoint {
+func initCheckpoint(log *logp.Logger, c exclinput.Cursor) checkpoint {
 	if c.IsNew() {
 		return checkpoint{Version: cursorVersion}
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	"github.com/urso/sderr"
@@ -17,23 +16,38 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
 
-	"github.com/elastic/go-concert/chorus"
 	"github.com/elastic/go-concert/ctxtool"
 	"github.com/elastic/go-concert/unison"
 )
 
 type CursorInputManager struct {
 	Logger              *logp.Logger
-	Registry            *statestore.Registry
-	DefaultStore        string
+	StateStore          StateStore
 	Type                string
 	DefaultCleanTimeout time.Duration
 	Configure           func(cfg *common.Config) ([]Source, CursorInput, error)
 
-	closer  *chorus.Closer
-	wg      sync.WaitGroup
 	session *session
 	store   *store
+}
+
+type StateStore interface {
+	Access() (*statestore.Store, error)
+	CleanupInterval() time.Duration
+}
+
+type beatsStore struct {
+	registry        *statestore.Registry
+	name            string
+	cleanupInterval time.Duration
+}
+
+func (s *beatsStore) Access() (*statestore.Store, error) {
+	return s.registry.Get(s.name)
+}
+
+func (s *beatsStore) CleanupInterval() time.Duration {
+	return s.cleanupInterval
 }
 
 type CursorInput interface {
@@ -73,49 +87,56 @@ func (cim *CursorInputManager) init() error {
 		cim.DefaultCleanTimeout = 30 * time.Minute
 	}
 
-	log := cim.Logger.With("statestore", cim.DefaultStore)
-
-	closer := chorus.NewCloser(nil)
-
-	store, err := openStore(log, cim.Registry, cim.DefaultStore, cim.Type)
+	log := cim.Logger.With("input_type", cim.Type)
+	store, err := openStore(log, cim.StateStore, cim.Type)
 	if err != nil {
 		return err
 	}
 
-	cleaner := &cleaner{log: log, closer: closer, store: store}
-
-	cim.wg.Add(1)
-	go func() {
-		defer cim.wg.Done()
-		cleaner.run(1 * time.Minute) // TODO: how to configure. This is a global setting, that must not be configured per input
-	}()
-
 	cim.session = newSession(store)
-	cim.closer = closer
 	cim.store = store
 
 	return nil
 }
 
-func (cim *CursorInputManager) Start(mode v2.Mode) error {
-	cim.init()
-
+func (cim *CursorInputManager) Init(group unison.Group, mode v2.Mode) error {
 	if mode != v2.ModeRun {
 		return nil
 	}
 
-	return cim.init()
+	if err := cim.init(); err != nil {
+		return err
+	}
+
+	log := cim.Logger.With("input_type", cim.Type)
+
+	store := cim.store
+	cleaner := &cleaner{log: log}
+	store.Retain()
+	err := group.Go(func(canceler unison.Canceler) error {
+		defer cim.shutdown()
+		defer store.Release()
+		cleaner.run(canceler, store, 1*time.Minute)
+		return nil
+	})
+	if err != nil {
+		store.Release()
+		cim.shutdown()
+		return sderr.Wrap(err, "Can not start registry cleanup process")
+	}
+
+	return nil
 }
 
-func (cim *CursorInputManager) Stop() {
-	defer cim.store.Close()
-
-	cim.closer.Close()
+func (cim *CursorInputManager) shutdown() {
 	cim.session.Close()
-	cim.wg.Wait()
 }
 
 func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
+	if err := cim.init(); err != nil {
+		return nil, err
+	}
+
 	settings := struct {
 		CleanTimeout time.Duration `config:"clean_timeout"`
 	}{CleanTimeout: cim.DefaultCleanTimeout}

@@ -47,6 +47,8 @@ func newSession(store *store) *session {
 
 // Close waits for updates that are currently executed, and stops all future update events.
 func (s *session) Close() {
+	defer s.store.Release()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -22,14 +22,12 @@ import (
 
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
-	"github.com/elastic/go-concert/chorus"
+	"github.com/elastic/go-concert/unison"
 )
 
 // cleaner removes finished entries from the registry file.
 type cleaner struct {
-	log    *logp.Logger
-	closer *chorus.Closer
-	store  *store
+	log *logp.Logger
 }
 
 // run starts a loop that tries to clean entries from the registry.
@@ -43,7 +41,7 @@ type cleaner struct {
 // The event acquisition timestamp is used as reference to clean resources. If a resources was blocked
 // for a long time, and the life time has been exhausted, then the resource will be removed immediately
 // once the last event has been ACKed.
-func (c *cleaner) run(interval time.Duration) {
+func (c *cleaner) run(canceler unison.Canceler, store *store, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -52,8 +50,8 @@ func (c *cleaner) run(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			c.cleanup(started)
-		case <-c.closer.Done():
+			c.cleanup(started, store)
+		case <-canceler.Done():
 			return
 		}
 	}
@@ -65,11 +63,11 @@ func (c *cleaner) run(interval time.Duration) {
 // + ttl` to decide if an entry will be removed. This way old entries are not
 // removed immediately on startup if the Beat is down for a longer period of
 // time.
-func (c *cleaner) cleanup(started time.Time) {
+func (c *cleaner) cleanup(started time.Time, store *store) {
 	c.log.Debugf("Start store cleanup")
 	defer c.log.Debugf("Done store cleanup")
 
-	states := c.store.ephemeralStore
+	states := store.ephemeralStore
 	states.mu.Lock()
 	defer states.mu.Unlock()
 
@@ -109,7 +107,7 @@ func (c *cleaner) cleanup(started time.Time) {
 
 	// try to delete entries from the registry and internal state storage
 	if numStored > 0 {
-		err := c.store.persistentStore.Update(func(tx *statestore.Tx) error {
+		err := store.persistentStore.Update(func(tx *statestore.Tx) error {
 			for k, stored := range keys {
 				if !stored {
 					continue
