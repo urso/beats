@@ -6,7 +6,9 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
-func osInputs(info beat.Info, log *logp.Logger, _ components.Components) *v2.Registry {
+type osCompoments interface{}
+
+func osInputs(info beat.Info, log *logp.Logger, components osComponents) *v2.Registry {
 	return v2.NewRegistry(
 	// TODO: add windows event logs
 	)
