@@ -60,10 +60,14 @@ var (
 	registrySuccess = monitoring.NewInt(nil, "registrar.writes.success")
 )
 
+type StateStore interface {
+	Access() (*statestore.Store, error)
+}
+
 // New creates a new Registrar instance, updating the registry file on
 // `file.State` updates. New fails if the file can not be opened or created.
-func New(stateStore *statestore.Registry, out successLogger, flushTimeout time.Duration) (*Registrar, error) {
-	store, err := stateStore.Get("filebeat")
+func New(stateStore StateStore, out successLogger, flushTimeout time.Duration) (*Registrar, error) {
+	store, err := stateStore.Access()
 	if err != nil {
 		return nil, err
 	}

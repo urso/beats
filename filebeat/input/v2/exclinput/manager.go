@@ -36,20 +36,6 @@ type StateStore interface {
 	CleanupInterval() time.Duration
 }
 
-type beatsStore struct {
-	registry        *statestore.Registry
-	name            string
-	cleanupInterval time.Duration
-}
-
-func (s *beatsStore) Access() (*statestore.Store, error) {
-	return s.registry.Get(s.name)
-}
-
-func (s *beatsStore) CleanupInterval() time.Duration {
-	return s.cleanupInterval
-}
-
 type CursorInput interface {
 	Name() string
 	Test(Source, input.TestContext) error
@@ -116,7 +102,7 @@ func (cim *CursorInputManager) Init(group unison.Group, mode v2.Mode) error {
 	err := group.Go(func(canceler unison.Canceler) error {
 		defer cim.shutdown()
 		defer store.Release()
-		cleaner.run(canceler, store, 1*time.Minute)
+		cleaner.run(canceler, store, cim.StateStore.CleanupInterval())
 		return nil
 	})
 	if err != nil {

@@ -51,10 +51,11 @@ type Config struct {
 }
 
 type Registry struct {
-	Path         string        `config:"path"`
-	Permissions  os.FileMode   `config:"file_permissions"`
-	FlushTimeout time.Duration `config:"flush"`
-	MigrateFile  string        `config:"migrate_file"`
+	Path          string        `config:"path"`
+	Permissions   os.FileMode   `config:"file_permissions"`
+	FlushTimeout  time.Duration `config:"flush"`
+	CleanInterval time.Duration `config:"cleanup_interval"`
+	MigrateFile   string        `config:"migrate_file"`
 }
 
 var (

@@ -30,7 +30,6 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/urso/sderr"
 )
 
@@ -55,7 +54,7 @@ const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
 
 const pluginName = "journald"
 
-func Plugin(log *logp.Logger, reg *statestore.Registry, defaultStore string) input.Plugin {
+func Plugin(log *logp.Logger, store exclinput.StateStore) input.Plugin {
 	return input.Plugin{
 		Name:       pluginName,
 		Stability:  feature.Beta,
@@ -63,14 +62,10 @@ func Plugin(log *logp.Logger, reg *statestore.Registry, defaultStore string) inp
 		Info:       "journald input",
 		Doc:        "The journald input collects logs from the local journald service",
 		Manager: &exclinput.CursorInputManager{
-			Logger: log,
-			StateStore: &beatsStore{
-				registry:        reg,
-				name:            defaultStore,
-				cleanupInterval: 1 * time.Minute,
-			},
-			Type:      pluginName,
-			Configure: configure,
+			Logger:     log,
+			StateStore: store,
+			Type:       pluginName,
+			Configure:  configure,
 		},
 	}
 }

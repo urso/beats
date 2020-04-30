@@ -3,15 +3,19 @@ package fbossinputs
 import (
 	"github.com/elastic/beats/v7/filebeat/features/input/tcp"
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
+	"github.com/elastic/beats/v7/filebeat/input/v2/exclinput"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/statestore"
 )
 
-func Inputs(info beat.Info, log *logp.Logger, reg *statestore.Registry) *v2.Registry {
+type Components interface {
+	exclinput.StateStore
+}
+
+func Inputs(info beat.Info, log *logp.Logger, components Components) *v2.Registry {
 	return v2.NewRegistry(
 		genericInputs(),
-		osInputs(info, log, reg),
+		osInputs(info, log, components),
 	)
 }
 

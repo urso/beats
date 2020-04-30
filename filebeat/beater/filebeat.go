@@ -25,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/elastic/beats/v7/filebeat/channel"
-	"github.com/elastic/beats/v7/filebeat/config"
 	cfg "github.com/elastic/beats/v7/filebeat/config"
 	"github.com/elastic/beats/v7/filebeat/features/fbossinputs"
 	"github.com/elastic/beats/v7/filebeat/fileset"
@@ -45,10 +44,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/management"
 	"github.com/elastic/beats/v7/libbeat/monitoring"
 	"github.com/elastic/beats/v7/libbeat/outputs/elasticsearch"
-	"github.com/elastic/beats/v7/libbeat/paths"
 	"github.com/elastic/beats/v7/libbeat/publisher/pipetool"
-	"github.com/elastic/beats/v7/libbeat/statestore"
-	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
 	"github.com/elastic/go-concert/unison"
 
 	_ "github.com/elastic/beats/v7/filebeat/include"
@@ -233,7 +229,7 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 		return err
 	}
 
-	stateStore, err := openStateStore(config.Registry)
+	stateStore, err := openStateStore(b.Info, config.Registry)
 	if err != nil {
 		logp.Err("Failed to open state store: %+v", err)
 		return err
@@ -411,17 +407,6 @@ func (fb *Filebeat) Stop() {
 
 	// Stop Filebeat
 	close(fb.done)
-}
-
-func openStateStore(cfg config.Registry) (*statestore.Registry, error) {
-	memlog, err := memlog.New(memlog.Settings{
-		Root:     paths.Resolve(paths.Data, cfg.Path),
-		FileMode: cfg.Permissions,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return statestore.NewRegistry(memlog), nil
 }
 
 // Create a new pipeline loader (es client) factory
