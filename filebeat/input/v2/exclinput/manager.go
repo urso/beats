@@ -102,7 +102,11 @@ func (cim *CursorInputManager) Init(group unison.Group, mode v2.Mode) error {
 	err := group.Go(func(canceler unison.Canceler) error {
 		defer cim.shutdown()
 		defer store.Release()
-		cleaner.run(canceler, store, cim.StateStore.CleanupInterval())
+		interval := cim.StateStore.CleanupInterval()
+		if interval <= 0 {
+			interval = 5 * time.Minute
+		}
+		cleaner.run(canceler, store, interval)
 		return nil
 	})
 	if err != nil {

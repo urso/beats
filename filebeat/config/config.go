@@ -61,9 +61,10 @@ type Registry struct {
 var (
 	DefaultConfig = Config{
 		Registry: Registry{
-			Path:        "registry",
-			Permissions: 0600,
-			MigrateFile: "",
+			Path:          "registry",
+			Permissions:   0600,
+			MigrateFile:   "",
+			CleanInterval: 5 * time.Minute,
 		},
 		ShutdownTimeout:    0,
 		OverwritePipelines: false,
