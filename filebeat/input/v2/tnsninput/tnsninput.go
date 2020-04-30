@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	"github.com/elastic/go-concert/unison"
+
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -45,8 +47,7 @@ type statelessInputInst struct {
 
 var _ v2.InputManager = Manager{}
 
-func (m Manager) Start(_ v2.Mode) error { return nil }
-func (m Manager) Stop()                 {}
+func (m Manager) Init(_ unison.Group, _ v2.Mode) error { return nil }
 
 // Create configures a transient input and ensures that the final input can be used with
 // with the filebeat input architecture.

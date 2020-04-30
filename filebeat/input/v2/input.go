@@ -4,14 +4,15 @@ import (
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
+
+	"github.com/elastic/go-concert/unison"
 )
 
 // InputManager creates and maintains actions and background processes for an
 // input type.
 type InputManager interface {
-	Start(m Mode) error
-
-	Stop()
+	// Init signals to InputManager to initialize internal resources.
+	Init(grp unison.Group, m Mode) error
 
 	// Creates builds a new Input instance from the given configuation, or returns
 	// an error if the configuation is invalid.
@@ -19,6 +20,16 @@ type InputManager interface {
 	// methods of the input.
 	Create(*common.Config) (Input, error)
 }
+
+// Mode tells the InputManager in which mode it is initialized.
+type Mode uint8
+
+//go:generate stringer -type Mode -trimprefix Mode
+const (
+	ModeRun Mode = iota
+	ModeTest
+	ModeOther
+)
 
 // Input is a configured input object that can be used to probe or start
 // the actual data processing.
