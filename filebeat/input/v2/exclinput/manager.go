@@ -123,10 +123,6 @@ func (cim *CursorInputManager) shutdown() {
 }
 
 func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
-	if err := cim.init(); err != nil {
-		return nil, err
-	}
-
 	settings := struct {
 		CleanTimeout time.Duration `config:"clean_timeout"`
 	}{CleanTimeout: cim.DefaultCleanTimeout}
