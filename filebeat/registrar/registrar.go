@@ -122,7 +122,6 @@ func (r *Registrar) Start() error {
 // Stop stops the registry. It waits until Run function finished.
 func (r *Registrar) Stop() {
 	logp.Info("Stopping Registrar")
-	defer r.store.Close()
 
 	close(r.done)
 	r.wg.Wait()
@@ -131,6 +130,8 @@ func (r *Registrar) Stop() {
 
 func (r *Registrar) Run() {
 	logp.Debug("registrar", "Starting Registrar")
+
+	defer r.store.Close()
 
 	var (
 		// we keep a long running write transaction.
