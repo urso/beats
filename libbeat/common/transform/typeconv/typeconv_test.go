@@ -86,4 +86,65 @@ func TestConverter(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, v.Timestamp.Format(time.RFC3339Nano), ts.Format(time.RFC3339Nano))
 	})
+
+	t.Run("complex with intermediate value", func(t *testing.T) {
+		type checkpoint struct {
+			Version            int
+			Position           string
+			RealtimeTimestamp  uint64
+			MonotonicTimestamp uint64
+		}
+
+		type (
+			stateInternal struct {
+				TTL     time.Duration
+				Updated time.Time
+			}
+
+			state struct {
+				Internal stateInternal
+				Cursor   interface{}
+			}
+		)
+
+		input := common.MapStr{
+			"_key": "test",
+			"internal": common.MapStr{
+				"ttl":     float64(1800000000000),
+				"updated": []interface{}{float64(515579904576), float64(1588432943)},
+			},
+			"cursor": common.MapStr{
+				"monotonictimestamp": float64(24881645756),
+				"position":           "s=86a99d3589f54f01804e844bebd787d5;i=4d19f;b=9c5d2b320b7946b4be53c0940a5b1289;m=5cb0fc8bc;t=5a488aeaa1130;x=ccbe23f507e8d0a4",
+				"realtimetimestamp":  float64(1588281836441904),
+				"version":            float64(1),
+			},
+		}
+
+		var st state
+		if err := Convert(&st, input); err != nil {
+			t.Fatalf("failed to unpack checkpoint: %+v", err)
+		}
+		assert.Equal(t, time.Duration(1800000000000), st.Internal.TTL)
+		assert.Equal(t, testDecodeTimestamp(t, 515579904576, 1588432943), st.Internal.Updated)
+		require.True(t, st.Cursor != nil)
+
+		var cp checkpoint
+		if err := Convert(&cp, st.Cursor); err != nil {
+			t.Fatalf("failed to unpack cursor: %+v", err)
+		}
+
+		assert.Equal(t, 1, cp.Version)
+		assert.Equal(t, "s=86a99d3589f54f01804e844bebd787d5;i=4d19f;b=9c5d2b320b7946b4be53c0940a5b1289;m=5cb0fc8bc;t=5a488aeaa1130;x=ccbe23f507e8d0a4", cp.Position)
+		assert.Equal(t, uint64(1588281836441904), cp.RealtimeTimestamp)
+		assert.Equal(t, uint64(24881645756), cp.MonotonicTimestamp)
+	})
+}
+
+func testDecodeTimestamp(t *testing.T, a, b uint64) time.Time {
+	ts, err := bitsToTimestamp(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ts
 }
