@@ -95,8 +95,8 @@ type (
 	}
 
 	stateInternal struct {
-		stateInternalTTL     `struct:",inline"`
-		stateInternalUpdated `struct:",inline"`
+		TTL     time.Duration
+		Updated time.Time
 	}
 
 	stateInternalTTL     struct{ TTL time.Duration }
@@ -243,7 +243,7 @@ func (s *states) Find(key string, create bool) *resource {
 }
 
 func (e *resource) IsNew() bool {
-	return !e.stored && e.state.Cursor == nil
+	return e.state.Cursor == nil
 }
 
 // Retain is used to indicate that 'resource' gets an additional 'owner'.
