@@ -1,4 +1,4 @@
-package exclinput
+package cursor
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/urso/sderr"
 )
 
-type CursorInput interface {
+type Input interface {
 	Name() string
 	Test(Source, input.TestContext) error
 	Run(input.Context, Source, Cursor, Publisher) error
@@ -27,9 +27,9 @@ type Cursor struct {
 }
 
 type managedInput struct {
-	manager      *CursorInputManager
+	manager      *InputManager
 	sources      []Source
-	input        CursorInput
+	input        Input
 	cleanTimeout time.Duration
 }
 

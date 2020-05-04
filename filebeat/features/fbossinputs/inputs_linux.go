@@ -3,7 +3,7 @@ package fbossinputs
 import (
 	"github.com/elastic/beats/v7/filebeat/features/input/journald"
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
-	"github.com/elastic/beats/v7/filebeat/input/v2/exclinput"
+	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
@@ -11,7 +11,7 @@ import (
 // inputs that are only supported on linux
 
 type osComponents interface {
-	exclinput.StateStore
+	cursor.StateStore
 }
 
 func osInputs(info beat.Info, log *logp.Logger, components osComponents) *v2.Registry {

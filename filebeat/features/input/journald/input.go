@@ -25,7 +25,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
-	"github.com/elastic/beats/v7/filebeat/input/v2/exclinput"
+	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
@@ -54,14 +54,14 @@ const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
 
 const pluginName = "journald"
 
-func Plugin(log *logp.Logger, store exclinput.StateStore) input.Plugin {
+func Plugin(log *logp.Logger, store cursor.StateStore) input.Plugin {
 	return input.Plugin{
 		Name:       pluginName,
 		Stability:  feature.Beta,
 		Deprecated: false,
 		Info:       "journald input",
 		Doc:        "The journald input collects logs from the local journald service",
-		Manager: &exclinput.CursorInputManager{
+		Manager: &cursor.InputManager{
 			Logger:     log,
 			StateStore: store,
 			Type:       pluginName,
@@ -76,7 +76,7 @@ var cursorVersion = 1
 
 func (p pathSource) Name() string { return string(p) }
 
-func configure(cfg *common.Config) ([]exclinput.Source, exclinput.CursorInput, error) {
+func configure(cfg *common.Config) ([]cursor.Source, cursor.Input, error) {
 	config := defaultConfig()
 	if err := cfg.Unpack(&config); err != nil {
 		return nil, nil, err
@@ -87,7 +87,7 @@ func configure(cfg *common.Config) ([]exclinput.Source, exclinput.CursorInput, e
 		paths = []string{localSystemJournalID}
 	}
 
-	sources := make([]exclinput.Source, len(paths))
+	sources := make([]cursor.Source, len(paths))
 	for i, p := range paths {
 		sources[i] = pathSource(p)
 	}
@@ -104,7 +104,7 @@ func configure(cfg *common.Config) ([]exclinput.Source, exclinput.CursorInput, e
 
 func (inp *journald) Name() string { return pluginName }
 
-func (inp *journald) Test(src exclinput.Source, ctx input.TestContext) error {
+func (inp *journald) Test(src cursor.Source, ctx input.TestContext) error {
 	// 1. check if we can open the journal
 	j, err := openJournal(src.Name())
 	if err != nil {
@@ -122,9 +122,9 @@ func (inp *journald) Test(src exclinput.Source, ctx input.TestContext) error {
 
 func (inp *journald) Run(
 	ctx input.Context,
-	src exclinput.Source,
-	cursor exclinput.Cursor,
-	publisher exclinput.Publisher,
+	src cursor.Source,
+	cursor cursor.Cursor,
+	publisher cursor.Publisher,
 ) error {
 	log := ctx.Logger.With("path", src.Name())
 	checkpoint := initCheckpoint(log, cursor)
@@ -168,7 +168,7 @@ func (inp *journald) Run(
 	}
 }
 
-func initCheckpoint(log *logp.Logger, c exclinput.Cursor) checkpoint {
+func initCheckpoint(log *logp.Logger, c cursor.Cursor) checkpoint {
 	if c.IsNew() {
 		return checkpoint{Version: cursorVersion}
 	}

@@ -1,4 +1,4 @@
-package exclinput
+package cursor
 
 import (
 	"time"
@@ -14,12 +14,12 @@ import (
 	"github.com/elastic/go-concert/unison"
 )
 
-type CursorInputManager struct {
+type InputManager struct {
 	Logger              *logp.Logger
 	StateStore          StateStore
 	Type                string
 	DefaultCleanTimeout time.Duration
-	Configure           func(cfg *common.Config) ([]Source, CursorInput, error)
+	Configure           func(cfg *common.Config) ([]Source, Input, error)
 
 	session *session
 	store   *store
@@ -34,7 +34,7 @@ type StateStore interface {
 	CleanupInterval() time.Duration
 }
 
-func (cim *CursorInputManager) init() error {
+func (cim *InputManager) init() error {
 	if cim.DefaultCleanTimeout <= 0 {
 		cim.DefaultCleanTimeout = 30 * time.Minute
 	}
@@ -51,7 +51,7 @@ func (cim *CursorInputManager) init() error {
 	return nil
 }
 
-func (cim *CursorInputManager) Init(group unison.Group, mode v2.Mode) error {
+func (cim *InputManager) Init(group unison.Group, mode v2.Mode) error {
 	if mode != v2.ModeRun {
 		return nil
 	}
@@ -84,11 +84,11 @@ func (cim *CursorInputManager) Init(group unison.Group, mode v2.Mode) error {
 	return nil
 }
 
-func (cim *CursorInputManager) shutdown() {
+func (cim *InputManager) shutdown() {
 	cim.session.Close()
 }
 
-func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error) {
+func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 	settings := struct {
 		CleanTimeout time.Duration `config:"clean_timeout"`
 	}{CleanTimeout: cim.DefaultCleanTimeout}
@@ -111,7 +111,7 @@ func (cim *CursorInputManager) Create(config *common.Config) (input.Input, error
 
 // Lock locks a key for exclusive access and returns an resource that can be used to modify
 // the cursor state and unlock the key.
-func (cim *CursorInputManager) lock(ctx input.Context, key string) (*resource, error) {
+func (cim *InputManager) lock(ctx input.Context, key string) (*resource, error) {
 	log := ctx.Logger
 
 	resource := cim.store.Find(key, true)

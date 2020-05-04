@@ -1,4 +1,4 @@
-package exclinput
+package cursor
 
 import (
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
