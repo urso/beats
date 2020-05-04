@@ -28,6 +28,7 @@ type Cursor struct {
 
 type managedInput struct {
 	manager      *InputManager
+	userID       string
 	sources      []Source
 	input        Input
 	cleanTimeout time.Duration
@@ -112,7 +113,8 @@ func (inp *managedInput) runSource(
 	defer client.Close()
 
 	// lock resource for exclusive access and create cursor
-	resource, err := inp.manager.lock(ctx, fmt.Sprintf("%v::%v", inp.manager.Type, source.Name()))
+	resourceKey := inp.createSourceID(source)
+	resource, err := inp.manager.lock(ctx, resourceKey)
 	if err != nil {
 		return err
 	}
@@ -127,6 +129,13 @@ func (inp *managedInput) runSource(
 	cursor := Cursor{session: session, resource: resource}
 	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
+}
+
+func (inp *managedInput) createSourceID(s Source) string {
+	if inp.userID != "" {
+		return fmt.Sprintf("%v::%v::%v", inp.manager.Type, inp.userID, s.Name())
+	}
+	return fmt.Sprintf("%v::%v", inp.manager.Type, s.Name())
 }
 
 func (c Cursor) IsNew() bool { return c.resource.IsNew() }

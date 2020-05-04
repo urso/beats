@@ -90,8 +90,9 @@ func (cim *InputManager) shutdown() {
 
 func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 	settings := struct {
+		ID           string        `config:"id"`
 		CleanTimeout time.Duration `config:"clean_timeout"`
-	}{CleanTimeout: cim.DefaultCleanTimeout}
+	}{ID: "", CleanTimeout: cim.DefaultCleanTimeout}
 	if err := config.Unpack(&settings); err != nil {
 		return nil, err
 	}
@@ -103,6 +104,7 @@ func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 
 	return &managedInput{
 		manager:      cim,
+		userID:       settings.ID,
 		sources:      sources,
 		input:        inp,
 		cleanTimeout: settings.CleanTimeout,
