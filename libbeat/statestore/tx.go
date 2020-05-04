@@ -101,7 +101,9 @@ func (tx *Tx) Commit() error {
 	}
 
 	defer tx.close()
-	return tx.backend.Commit()
+	tx.active = false
+	err := tx.backend.Commit()
+	return err
 }
 
 // Has returns true if the key is present in the store.
