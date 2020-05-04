@@ -28,10 +28,10 @@ import (
 // transaction will not be blocked for too long. The backend implements the
 // actual locking strategies.
 type Tx struct {
-	store    *Store
 	active   bool
 	readonly bool
 	backend  tx
+	finishCB func()
 
 	gen *idGen
 }
@@ -40,8 +40,8 @@ type tx interface {
 	backend.Tx
 }
 
-func newTx(store *Store, backend backend.Tx, readonly bool) *Tx {
-	return &Tx{store: store, active: true, readonly: readonly, backend: backend}
+func newTx(backend backend.Tx, readonly bool) *Tx {
+	return &Tx{active: true, readonly: readonly, backend: backend}
 }
 
 func (tx *Tx) close() error {
@@ -51,7 +51,9 @@ func (tx *Tx) close() error {
 		}
 
 		err := tx.backend.Close()
-		tx.store.finishTx(tx)
+		if tx.finishCB != nil {
+			tx.finishCB()
+		}
 
 		tx.active = false
 
@@ -82,16 +84,23 @@ func (tx *Tx) Rollback() error {
 	if !tx.active {
 		return errTxClosed
 	}
+	if tx.readonly {
+		return errTxReadonly
+	}
+
 	return tx.Close()
 }
 
 // Commit applies all local changes and closes the current transaction.
 func (tx *Tx) Commit() error {
-	defer tx.close()
-
 	if !tx.active {
 		return errTxClosed
 	}
+	if tx.readonly {
+		return errTxReadonly
+	}
+
+	defer tx.close()
 	return tx.backend.Commit()
 }
 
@@ -119,6 +128,13 @@ func (tx *Tx) Get(key Key) (ValueDecoder, error) {
 // The value should be a map or a go struct. During serialization all fields
 // found in val will be added to the inserted document.
 func (tx *Tx) Insert(val interface{}) (Key, error) {
+	if !tx.active {
+		return "", errTxClosed
+	}
+	if tx.readonly {
+		return "", errTxReadonly
+	}
+
 	if tx.gen == nil {
 		tx.gen = newIDGen()
 	}
@@ -148,6 +164,10 @@ func (tx *Tx) Remove(key Key) error {
 	if !tx.active {
 		return errTxClosed
 	}
+	if tx.readonly {
+		return errTxReadonly
+	}
+
 	return tx.backend.Remove(backend.Key(key))
 }
 
@@ -157,6 +177,9 @@ func (tx *Tx) Remove(key Key) error {
 func (tx *Tx) Set(key Key, val interface{}) error {
 	if !tx.active {
 		return errTxClosed
+	}
+	if tx.readonly {
+		return errTxReadonly
 	}
 	return tx.backend.Set(backend.Key(key), val)
 }
@@ -168,6 +191,9 @@ func (tx *Tx) Set(key Key, val interface{}) error {
 func (tx *Tx) Update(key Key, fields interface{}) error {
 	if !tx.active {
 		return errTxClosed
+	}
+	if tx.readonly {
+		return errTxReadonly
 	}
 	return tx.backend.Update(backend.Key(key), fields)
 }

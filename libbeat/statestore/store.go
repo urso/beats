@@ -86,13 +86,15 @@ func (s *Store) Begin(readonly bool) (*Tx, error) {
 		return nil, errStoreClosed
 	}
 
-	tx, err := s.shared.backend.Begin(readonly)
+	backendTx, err := s.shared.backend.Begin(readonly)
 	if err != nil {
 		return nil, err
 	}
 
 	s.activeTx.Add(1)
-	return newTx(s, tx, readonly), nil
+	tx := newTx(backendTx, readonly)
+	tx.finishCB = s.finishTx
+	return tx, nil
 }
 
 // Update runs fn within a writeable transaction. The transaction will be
@@ -124,7 +126,7 @@ func (s *Store) View(fn func(tx *Tx) error) error {
 	return fn(tx)
 }
 
-func (s *Store) finishTx(tx *Tx) {
+func (s *Store) finishTx() {
 	s.activeTx.Done()
 }
 
