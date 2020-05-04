@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package tnsninput
+package stateless
 
 import (
 	"fmt"
@@ -28,9 +28,9 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common"
 )
 
-// Manager provides an InputManager for transient inputs, that do not store
+// InputManager provides an InputManager for transient inputs, that do not store
 // state in the registry or require end-to-end event acknowledgement.
-type Manager struct {
+type InputManager struct {
 	Configure func(*common.Config) (Input, error)
 }
 
@@ -41,27 +41,27 @@ type Input interface {
 	Run(ctx v2.Context, publish func(beat.Event)) error
 }
 
-type statelessInputInst struct {
+type configuredInput struct {
 	input Input
 }
 
-var _ v2.InputManager = Manager{}
+var _ v2.InputManager = InputManager{}
 
-func (m Manager) Init(_ unison.Group, _ v2.Mode) error { return nil }
+func (m InputManager) Init(_ unison.Group, _ v2.Mode) error { return nil }
 
 // Create configures a transient input and ensures that the final input can be used with
 // with the filebeat input architecture.
-func (m Manager) Create(cfg *common.Config) (v2.Input, error) {
+func (m InputManager) Create(cfg *common.Config) (v2.Input, error) {
 	inp, err := m.Configure(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return statelessInputInst{inp}, nil
+	return configuredInput{inp}, nil
 }
 
-func (si statelessInputInst) Name() string { return si.input.Name() }
+func (si configuredInput) Name() string { return si.input.Name() }
 
-func (si statelessInputInst) Run(ctx v2.Context, pipeline beat.PipelineConnector) (err error) {
+func (si configuredInput) Run(ctx v2.Context, pipeline beat.PipelineConnector) (err error) {
 	defer func() {
 		if v := recover(); v != nil {
 			if e, ok := v.(error); ok {
@@ -92,6 +92,6 @@ func (si statelessInputInst) Run(ctx v2.Context, pipeline beat.PipelineConnector
 	return si.input.Run(ctx, client.Publish)
 }
 
-func (si statelessInputInst) Test(ctx v2.TestContext) error {
+func (si configuredInput) Test(ctx v2.TestContext) error {
 	return si.input.Test(ctx)
 }
