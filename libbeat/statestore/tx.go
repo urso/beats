@@ -101,7 +101,6 @@ func (tx *Tx) Commit() error {
 	}
 
 	defer tx.close()
-	tx.active = false
 	err := tx.backend.Commit()
 	return err
 }
