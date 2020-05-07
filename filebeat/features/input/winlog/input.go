@@ -8,7 +8,6 @@ import (
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
-	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
@@ -17,13 +16,6 @@ import (
 	"github.com/elastic/beats/v7/winlogbeat/checkpoint"
 	"github.com/elastic/beats/v7/winlogbeat/eventlog"
 )
-
-type eventLogger struct {
-	source     eventlog.EventLog
-	eventMeta  common.EventMetadata
-	processors beat.ProcessorList
-	keepNull   bool
-}
 
 type eventlogRunner struct{}
 
@@ -46,6 +38,8 @@ func Plugin(log *logp.Logger, store cursor.StateStore) input.Plugin {
 }
 
 func configure(cfg *common.Config) ([]cursor.Source, cursor.Input, error) {
+	// TODO: do we want to allow to read multiple eventLogs using a single config
+	//       as is common for other inputs?
 	eventLog, err := eventlog.New(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to create new event log. %v", err)
