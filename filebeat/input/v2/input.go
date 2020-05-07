@@ -55,7 +55,6 @@ type Context struct {
 	ID          string
 	Agent       beat.Info
 	Logger      *logp.Logger
-	Status      RunnerObserver
 	Metadata    *common.MapStrPointer // XXX: from Autodiscovery.
 	Cancelation Canceler
 }

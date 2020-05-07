@@ -91,7 +91,7 @@ func (s *server) Run(ctx input.Context, publish func(beat.Event)) error {
 		return err
 	}
 
-	ctx.Status.Initialized()
+	ctx.Logger.Debugf("TCP Input '%v' initialized", ctx.ID)
 
 	// run server in background and add support to wait for shutdown
 	// Note: We start the server before setting up shutdown signaling. Doing it the
@@ -103,12 +103,12 @@ func (s *server) Run(ctx input.Context, publish func(beat.Event)) error {
 		defer wg.Done()
 		err = server.Run()
 	}()
-	ctx.Status.Active()
+	ctx.Logger.Debugf("TCP Input '%v' active", ctx.ID)
 
 	// make sure we call server.Stop() on shutdown or if Run has finished by
 	// itself.
 	_, cancel := ctxtool.WithFunc(ctxtool.FromCanceller(ctx.Cancelation), func() {
-		ctx.Status.Stopping()
+		ctx.Logger.Debugf("TCP Input '%v' received stop signal", ctx.ID)
 		server.Stop()
 	})
 	defer cancel()

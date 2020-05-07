@@ -71,22 +71,6 @@ func (r *runner) Start() {
 	log := r.log
 	name := r.input.Name()
 
-	status := v2.BuildStatusObserver{
-		Initialized: func() {
-			log.Debugf("Input '%v' initialized", name)
-		},
-		Active: func() {
-			log.Debugf("Input '%v' active", name)
-		},
-		Failing: func(err error) {
-			log.Errorf("Input '%v' in temporary error state caused by: %+v",
-				name, err)
-		},
-		Stopping: func() {
-			log.Infof("Input '%v' received stop signal.", name)
-		},
-	}.Create()
-
 	go func() {
 		log.Infof("Input %v starting", name)
 		err := r.input.Run(
@@ -95,13 +79,14 @@ func (r *runner) Start() {
 				Agent:       *r.agent,
 				Logger:      log,
 				Cancelation: r.sig,
-				Status:      status,
 				Metadata:    r.meta,
 			},
 			r.connector,
 		)
 		if err != nil {
 			log.Errorf("Input '%v' failed with: %+v", name, err)
+		} else {
+			log.Info("Input '%v' stopped", name)
 		}
 	}()
 }
