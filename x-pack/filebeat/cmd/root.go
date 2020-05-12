@@ -5,16 +5,20 @@
 package cmd
 
 import (
-	"github.com/elastic/beats/v7/filebeat/cmd"
+	fbcmd "github.com/elastic/beats/v7/filebeat/cmd"
+	cmd "github.com/elastic/beats/v7/libbeat/cmd"
 	xpackcmd "github.com/elastic/beats/v7/x-pack/libbeat/cmd"
 
 	// Register the includes.
+	inputs "github.com/elastic/beats/v7/x-pack/filebeat/features/input/default-inputs"
 	_ "github.com/elastic/beats/v7/x-pack/filebeat/include"
 )
 
-// RootCmd to handle beats CLI.
-var RootCmd = cmd.RootCmd
+const Name = fbcmd.Name
 
-func init() {
-	xpackcmd.AddXPack(RootCmd, cmd.Name)
+// Filebeat build the beat root command for executing filebeat and it's subcommands.
+func Filebeat() *cmd.BeatsRootCmd {
+	command := fbcmd.Filebeat(inputs.Init)
+	xpackcmd.AddXPack(command, Name)
+	return command
 }
