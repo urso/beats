@@ -1,0 +1,9 @@
+filebeat.inputs:
+- type: journald
+  include_matches:
+  - syslog.identifier=test
+
+
+output.console:
+  codec.format:
+    string: '%{[@timestamp]} - %{[syslog.identifier]}: %{[message]}'
