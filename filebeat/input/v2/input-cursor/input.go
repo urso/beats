@@ -152,12 +152,20 @@ func (c Cursor) Migrate(val interface{}) error {
 }
 
 func newInputACKHandler(log *logp.Logger) beat.ACKer {
-	return acker.LastEventPrivateReporter(func(acked int, private interface{}) {
-		op, ok := private.(*updateOp)
-		if !ok {
-			log.Errorf("Wrong event type ACKed")
-		} else {
+	return acker.EventPrivateReporter(func(acked int, private []interface{}) {
+		for i := len(private) - 1; i >= 0; i-- {
+			current := private[i]
+			if current == nil {
+				continue
+			}
+
+			op, ok := current.(*updateOp)
+			if !ok {
+				continue
+			}
+
 			op.Execute()
+			return
 		}
 	})
 }
