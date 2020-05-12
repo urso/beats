@@ -59,7 +59,7 @@ func Plugin() input.Plugin {
 		Deprecated: false,
 		Info:       "kafka input",
 		Doc:        "Collect events from Kafka topics",
-		Manager:    &inputManager{Configure: configure},
+		Manager:    input.ConfigureWith(configure),
 	}
 }
 
