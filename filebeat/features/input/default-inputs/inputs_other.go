@@ -1,6 +1,6 @@
 // +build !windows,!linux
 
-package fbossinputs
+package inputs
 
 import (
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
