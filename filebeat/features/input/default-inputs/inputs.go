@@ -26,16 +26,16 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
-func Init(info beat.Info, log *logp.Logger, components beater.StateStore) *v2.Registry {
-	return v2.NewRegistry(
+func Init(info beat.Info, log *logp.Logger, components beater.StateStore) []v2.Plugin {
+	return append(
 		genericInputs(),
-		osInputs(info, log, components),
+		osInputs(info, log, components)...,
 	)
 }
 
-func genericInputs() *v2.Registry {
-	return v2.NewRegistry(
+func genericInputs() []v2.Plugin {
+	return []v2.Plugin{
 		tcp.Plugin(),
 		kafka.Plugin(),
-	)
+	}
 }

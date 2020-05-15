@@ -76,7 +76,7 @@ type Filebeat struct {
 	pipeline       beat.PipelineConnector
 }
 
-type PluginFactory func(beat.Info, *logp.Logger, StateStore) *v2.Registry
+type PluginFactory func(beat.Info, *logp.Logger, StateStore) []v2.Plugin
 
 type StateStore interface {
 	Access() (*statestore.Store, error)

@@ -13,15 +13,15 @@ import (
 	"github.com/elastic/beats/v7/x-pack/filebeat/features/input/o365"
 )
 
-func Init(info beat.Info, log *logp.Logger, store beater.StateStore) *v2.Registry {
-	return v2.NewRegistry(
-		ossinputs.Init(info, log, store),
+func Init(info beat.Info, log *logp.Logger, store beater.StateStore) []v2.Plugin {
+	return append(
 		xpackInputs(info, log, store),
+		ossinputs.Init(info, log, store)...,
 	)
 }
 
-func xpackInputs(info beat.Info, log *logp.Logger, store beater.StateStore) *v2.Registry {
-	return v2.NewRegistry(
+func xpackInputs(info beat.Info, log *logp.Logger, store beater.StateStore) []v2.Plugin {
+	return []v2.Plugin{
 		o365.Plugin(log, store),
-	)
+	}
 }

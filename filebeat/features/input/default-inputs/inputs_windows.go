@@ -29,8 +29,8 @@ type osComponents interface {
 	cursor.StateStore
 }
 
-func osInputs(info beat.Info, log *logp.Logger, components osComponents) *v2.Registry {
-	return v2.NewRegistry(
+func osInputs(info beat.Info, log *logp.Logger, components osComponents) []v2.Plugin {
+	return []v2.Plugin{
 		winlog.Plugin(log, components),
-	)
+	}
 }

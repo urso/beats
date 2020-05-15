@@ -27,19 +27,23 @@ import (
 )
 
 type Loader struct {
-	registry    *Registry
+	registry    map[string]Plugin
 	typeField   string
 	defaultType string
 }
 
-func NewLoader(registry *Registry, typeField, defaultType string) (*Loader, error) {
-	required(registry != nil, "no registry set")
+func NewLoader(plugins []Plugin, typeField, defaultType string) (*Loader, error) {
 	if typeField == "" {
 		typeField = "type"
 	}
 
-	if err := ValidateRegistry(registry); err != nil {
+	if err := validatePlugins(plugins); err != nil {
 		return nil, err
+	}
+
+	registry := make(map[string]Plugin, len(plugins))
+	for _, p := range plugins {
+		registry[p.Name] = p
 	}
 
 	return &Loader{
@@ -50,12 +54,12 @@ func NewLoader(registry *Registry, typeField, defaultType string) (*Loader, erro
 }
 
 func (l *Loader) Init(group unison.Group, mode Mode) error {
-	var err error
-	l.registry.Each(func(p Plugin) bool {
-		err = p.Manager.Init(group, mode)
-		return err == nil
-	})
-	return err
+	for _, p := range l.registry {
+		if err := p.Manager.Init(group, mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *Loader) Configure(cfg *common.Config) (Input, error) {
@@ -70,9 +74,9 @@ func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 		name = l.defaultType
 	}
 
-	p, err := l.registry.Find(name)
-	if err != nil {
-		return nil, &LoaderError{Name: name, Reason: err}
+	p, exists := l.registry[name]
+	if !exists {
+		return nil, &LoaderError{Name: name, Reason: ErrUnknown}
 	}
 
 	return p.Configure(cfg)
@@ -84,21 +88,20 @@ func required(b bool, msg string) {
 	}
 }
 
-// ValidateRegistry checks if there are multiple plugins with the same name
+// validatePlugins checks if there are multiple plugins with the same name
 // in the registry.
-func ValidateRegistry(c *Registry) error {
+func validatePlugins(plugins []Plugin) error {
 	seen := common.StringSet{}
 	dups := map[string]int{}
 
-	// recursively look for duplicate entries.
-	c.Each(func(p Plugin) bool {
+	// look for duplicate names.
+	for _, p := range plugins {
 		name := p.Details().Name
 		if seen.Has(name) {
 			dups[name]++
 		}
 		seen.Add(name)
-		return true
-	})
+	}
 
 	if len(dups) == 0 {
 		return nil
