@@ -38,8 +38,7 @@ type InputManager struct {
 	DefaultCleanTimeout time.Duration
 	Configure           func(cfg *common.Config) ([]Source, Input, error)
 
-	session *session
-	store   *store
+	store *store
 }
 
 type Source interface {
@@ -62,7 +61,6 @@ func (cim *InputManager) init() error {
 		return err
 	}
 
-	cim.session = newSession(store)
 	cim.store = store
 
 	return nil
@@ -102,7 +100,7 @@ func (cim *InputManager) Init(group unison.Group, mode v2.Mode) error {
 }
 
 func (cim *InputManager) shutdown() {
-	cim.session.Close()
+	cim.store.Release()
 }
 
 func (cim *InputManager) Create(config *common.Config) (input.Input, error) {

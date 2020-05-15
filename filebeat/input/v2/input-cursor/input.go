@@ -39,7 +39,7 @@ type Input interface {
 }
 
 type Cursor struct {
-	session  *session
+	store    *store
 	resource *resource
 }
 
@@ -75,11 +75,6 @@ func (inp *managedInput) Run(
 	defer cancel()
 	ctx.Cancelation = cancelCtx
 
-	session := inp.manager.session
-	if err != nil {
-		sderr.Wrap(err, "failed to access the state store")
-	}
-
 	var grp unison.MultiErrGroup
 	for _, source := range inp.sources {
 		source := source
@@ -89,7 +84,7 @@ func (inp *managedInput) Run(
 			inpCtx.ID = ctx.ID + "::" + source.Name()
 			inpCtx.Logger = ctx.Logger.With("source", source.Name())
 
-			if err = inp.runSource(inpCtx, session, source, pipeline); err != nil {
+			if err = inp.runSource(inpCtx, inp.manager.store, source, pipeline); err != nil {
 				cancel()
 			}
 			return err
@@ -104,7 +99,7 @@ func (inp *managedInput) Run(
 
 func (inp *managedInput) runSource(
 	ctx input.Context,
-	session *session,
+	store *store,
 	source Source,
 	pipeline beat.PipelineConnector,
 ) (err error) {
@@ -140,10 +135,10 @@ func (inp *managedInput) runSource(
 	// update clean timeout. If the resource is 'new' we will insert it into the registry now.
 	if resource.stored == false || inp.cleanTimeout != resource.state.Internal.TTL {
 		resource.state.Internal.TTL = inp.cleanTimeout
-		session.store.UpdateInternal(resource)
+		store.UpdateInternal(resource)
 	}
 
-	cursor := Cursor{session: session, resource: resource}
+	cursor := Cursor{store: store, resource: resource}
 	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
 }
@@ -165,7 +160,7 @@ func (c Cursor) Unpack(to interface{}) error {
 }
 
 func (c Cursor) Migrate(val interface{}) error {
-	return c.session.store.Migrate(c.resource, val)
+	return c.store.Migrate(c.resource, val)
 }
 
 func newInputACKHandler(log *logp.Logger) beat.ACKer {

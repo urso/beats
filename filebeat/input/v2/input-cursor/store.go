@@ -41,6 +41,9 @@ type store struct {
 	refCount        concert.RefCount
 	persistentStore *statestore.Store
 	ephemeralStore  *states
+
+	mu     sync.Mutex
+	closed bool
 }
 
 // states stores resource states in memory. When a cursor for an input is updated,
@@ -136,21 +139,28 @@ func openStore(log *logp.Logger, statestore StateStore, prefix string) (*store, 
 
 	ok = true
 	return &store{
-		log: log,
-		refCount: concert.RefCount{
-			Action: func(_ error) {
-				if err := persistentStore.Close(); err != nil {
-					log.Errorf("Closing registry store did report an error: %+v", err)
-				}
-			},
-		},
+		log:             log,
 		persistentStore: persistentStore,
 		ephemeralStore:  states,
 	}, nil
 }
 
-func (s *store) Retain()  { s.refCount.Retain() }
-func (s *store) Release() { s.refCount.Release() }
+func (s *store) Retain() { s.refCount.Retain() }
+func (s *store) Release() {
+	if s.refCount.Release() {
+		s.close()
+	}
+}
+
+func (s *store) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+
+	if err := s.persistentStore.Close(); err != nil {
+		s.log.Errorf("Closing registry store did report an error: %+v", err)
+	}
+}
 
 func (s *store) Find(key string, create bool) *resource {
 	return s.ephemeralStore.Find(key, create)
@@ -177,12 +187,18 @@ func (s *store) UpdateInternal(resource *resource) {
 }
 
 func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates interface{}) {
+	key := statestore.Key(resource.key)
 	updateCommand := registryStateUpdateCursor{
 		Internal: stateInternalUpdated{Updated: timestamp},
 		Cursor:   updates,
 	}
 
-	key := statestore.Key(resource.key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+
 	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
 		if !resource.internalInSync {
 			internalUpdCommand := registryStateUpdateInternal{Internal: resource.state.Internal}

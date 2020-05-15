@@ -18,6 +18,8 @@
 package cursor
 
 import (
+	"time"
+
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
 )
@@ -32,12 +34,20 @@ type cursorPublisher struct {
 	cursor *Cursor
 }
 
+type updateOp struct {
+	store     *store
+	resource  *resource
+	timestamp time.Time
+	ttl       time.Duration
+	delta     interface{}
+}
+
 func (c *cursorPublisher) Publish(event beat.Event, cursorUpdate interface{}) error {
 	if cursorUpdate == nil {
 		return c.forward(event)
 	}
 
-	op, err := c.cursor.session.CreateUpdateOp(c.cursor.resource, cursorUpdate)
+	op, err := createUpdateOp(c.cursor.store, c.cursor.resource, cursorUpdate)
 	if err != nil {
 		return err
 	}
@@ -49,4 +59,28 @@ func (c *cursorPublisher) Publish(event beat.Event, cursorUpdate interface{}) er
 func (c *cursorPublisher) forward(event beat.Event) error {
 	c.client.Publish(event)
 	return c.ctx.Cancelation.Err()
+}
+
+func createUpdateOp(store *store, resource *resource, updates interface{}) (*updateOp, error) {
+	ts := time.Now()
+
+	if err := resource.UpdateCursor(updates); err != nil {
+		return nil, err
+	}
+
+	resource.Retain()
+
+	resource.state.Internal.Updated = ts
+	return &updateOp{
+		resource:  resource,
+		store:     store,
+		timestamp: ts,
+		delta:     updates,
+	}, nil
+}
+
+func (op *updateOp) Execute() {
+	defer op.resource.Release()
+	op.store.UpdateCursor(op.resource, op.timestamp, op.delta)
+	*op = updateOp{}
 }
