@@ -41,9 +41,6 @@ type store struct {
 	refCount        concert.RefCount
 	persistentStore *statestore.Store
 	ephemeralStore  *states
-
-	mu     sync.Mutex
-	closed bool
 }
 
 // states stores resource states in memory. When a cursor for an input is updated,
@@ -153,10 +150,6 @@ func (s *store) Release() {
 }
 
 func (s *store) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = true
-
 	if err := s.persistentStore.Close(); err != nil {
 		s.log.Errorf("Closing registry store did report an error: %+v", err)
 	}
@@ -193,12 +186,6 @@ func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates in
 		Cursor:   updates,
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
-
 	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
 		if !resource.internalInSync {
 			internalUpdCommand := registryStateUpdateInternal{Internal: resource.state.Internal}
@@ -209,7 +196,9 @@ func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates in
 		return tx.Update(key, updateCommand)
 	})
 	if err != nil {
-		s.log.Errorf("Failed to update state in the registry for '%v'", key)
+		if !statestore.IsClosed(err) {
+			s.log.Errorf("Failed to update state in the registry for '%v'", key)
+		}
 	} else {
 		resource.internalInSync = true
 		resource.stored = true
