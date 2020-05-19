@@ -60,7 +60,7 @@ type Store interface {
 // Transactions must be isolated and updates atomic. Transaction must guarantee
 // consistent and valid state when re-opening a registry/store after restarts.
 //
-// The frontend guarantees that Write operations can not be called on a readonly transaction.
+// All operation must fail after the transaction has been closed, rolled back, or committed.
 type Tx interface {
 	// Close is always called at the end of a transaction.
 	Close() error

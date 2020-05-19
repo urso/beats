@@ -92,8 +92,17 @@ func (s *Store) Begin(readonly bool) (*Tx, error) {
 		return nil, &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
 	}
 
-	tx := newTx(s.shared.name, backendTx, readonly)
-	tx.finishCB = s.finishTx
+	mode := txWritable
+	if readonly {
+		mode = txReadonly
+	}
+
+	tx := &Tx{
+		store:    s.shared.name,
+		mode:     mode,
+		backend:  backendTx,
+		finishCB: s.finishTx,
+	}
 	ok = true
 	return tx, nil
 }

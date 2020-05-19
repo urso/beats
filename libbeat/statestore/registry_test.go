@@ -18,6 +18,7 @@
 package statestore
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,5 +110,23 @@ func TestAccessStore(t *testing.T) {
 		mr.AssertExpectations(t)
 		ms1.AssertExpectations(t)
 		ms2.AssertExpectations(t)
+	})
+
+	t.Run("backend fails to open registry", func(t *testing.T) {
+		const storeName = "test"
+		errAccess := errors.New(storeName)
+
+		mr := newMockRegistry()
+		mr.OnAccess("test").Once().Return(nil, errAccess)
+
+		reg := NewRegistry(mr)
+		s, err := reg.Get(storeName)
+		assert.Nil(t, s)
+
+		assert.Error(t, err)
+		assert.True(t, errors.As(err, new(*ErrorAccess)))
+		assert.True(t, errors.Is(err, errAccess))
+
+		mr.AssertExpectations(t)
 	})
 }

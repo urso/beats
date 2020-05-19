@@ -32,6 +32,10 @@ func TestStoreBeginTx(t *testing.T) {
 
 func testStoreBeginTxClosed(t *testing.T) {
 	makeTestStore := func(t *testing.T, ms *mockStore) *Store {
+		if ms == nil {
+			ms = newMockStore()
+		}
+
 		mr := newMockRegistry()
 		mr.OnAccess("test").Once().Return(ms, nil)
 
@@ -44,6 +48,13 @@ func testStoreBeginTxClosed(t *testing.T) {
 		require.NoError(t, s.Close())
 		return s
 	}
+
+	t.Run("error if closed twice", func(t *testing.T) {
+		store := makeTestStore(t, nil)
+		err := store.Close()
+		assert.Error(t, err)
+		assert.True(t, errors.As(err, new(*ErrorClosed)))
+	})
 
 	t.Run("begin readonly", func(t *testing.T) {
 		ms := newMockStore()

@@ -103,6 +103,7 @@ func (m *mockTx) Get(key backend.Key) (backend.ValueDecoder, error) {
 	return args.Get(0).(backend.ValueDecoder), args.Error(1)
 }
 
+func (m *mockTx) OnSet(key backend.Key, from interface{}) *mock.Call { return m.On("Set", key, from) }
 func (m *mockTx) Set(key backend.Key, from interface{}) error {
 	args := m.Called(key, from)
 	return args.Error(0)
