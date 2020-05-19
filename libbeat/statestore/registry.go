@@ -69,7 +69,7 @@ func (r *Registry) Get(name string) (*Store, error) {
 	if shared == nil {
 		backend, err := r.backend.Access(name)
 		if err != nil {
-			return nil, err
+			return nil, &ErrorAccess{name: name, cause: err}
 		}
 
 		shared = newSharedStore(r, name, backend)

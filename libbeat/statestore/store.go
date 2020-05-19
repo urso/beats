@@ -18,10 +18,10 @@
 package statestore
 
 import (
-	"sync"
-
 	"github.com/elastic/beats/v7/libbeat/common/atomic"
+	"github.com/elastic/beats/v7/libbeat/common/cleanup"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend"
+	"github.com/elastic/go-concert/unison"
 )
 
 type sharedStore struct {
@@ -39,8 +39,7 @@ type sharedStore struct {
 // an instance using `Registry.Get`.
 type Store struct {
 	shared   *sharedStore
-	active   bool
-	activeTx sync.WaitGroup // active transaction
+	activeTx unison.SafeWaitGroup // active transaction
 }
 
 func newSharedStore(reg *Registry, name string, backend backend.Store) *sharedStore {
@@ -56,7 +55,6 @@ func newStore(shared *sharedStore) *Store {
 	shared.Retain()
 	return &Store{
 		shared: shared,
-		active: true,
 	}
 }
 
@@ -64,15 +62,13 @@ func newStore(shared *sharedStore) *Store {
 // Already active transaction will continue to function until Closed.
 // The backing store will be closed once all stores and active transactions have been closed.
 func (s *Store) Close() error {
-	if !s.active {
-		return errStoreClosed
+	if err := s.activeTx.Add(1); err != nil {
+		return &ErrorClosed{operation: "store/close", name: s.shared.name}
 	}
+	s.activeTx.Done()
 
-	s.active = false
 	s.activeTx.Wait()
-
-	s.shared.Release()
-	return nil
+	return s.shared.Release()
 }
 
 // Begin starts a new transaction within the current store.
@@ -82,18 +78,23 @@ func (s *Store) Close() error {
 // For 'local' transaction and/or guarantees that `Close`, `Rollback`, or `Commit`
 // is called correctly use the `Update` or `View` methods.
 func (s *Store) Begin(readonly bool) (*Tx, error) {
-	if !s.active {
-		return nil, errStoreClosed
+	const operation = "store/begin-tx"
+
+	if err := s.activeTx.Add(1); err != nil {
+		return nil, &ErrorClosed{operation: operation, name: s.shared.name}
 	}
+
+	ok := false
+	defer cleanup.IfNot(&ok, s.activeTx.Done)
 
 	backendTx, err := s.shared.backend.Begin(readonly)
 	if err != nil {
-		return nil, err
+		return nil, &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
 	}
 
-	s.activeTx.Add(1)
-	tx := newTx(backendTx, readonly)
+	tx := newTx(s.shared.name, backendTx, readonly)
 	tx.finishCB = s.finishTx
+	ok = true
 	return tx, nil
 }
 
@@ -101,6 +102,8 @@ func (s *Store) Begin(readonly bool) (*Tx, error) {
 // rolled back if fn panics or returns an error.
 // The transaction will be comitted if fn returns without error.
 func (s *Store) Update(fn func(tx *Tx) error) error {
+	const operation = "store/update"
+
 	tx, err := s.Begin(false)
 	if err != nil {
 		return err
@@ -109,7 +112,7 @@ func (s *Store) Update(fn func(tx *Tx) error) error {
 	defer tx.Close()
 	if err := fn(tx); err != nil {
 		tx.Rollback()
-		return err
+		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
 	}
 	return tx.Commit()
 }
@@ -117,13 +120,18 @@ func (s *Store) Update(fn func(tx *Tx) error) error {
 // View executes a readonly transaction. An error is return if the readonly
 // transaction can not be generated or fn returns an error.
 func (s *Store) View(fn func(tx *Tx) error) error {
+	const operation = "store/view"
+
 	tx, err := s.Begin(true)
 	if err != nil {
 		return err
 	}
 
 	defer tx.Close()
-	return fn(tx)
+	if err := fn(tx); err != nil {
+		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
+	}
+	return nil
 }
 
 func (s *Store) finishTx() {
@@ -134,10 +142,11 @@ func (s *sharedStore) Retain() {
 	s.refCount.Inc()
 }
 
-func (s *sharedStore) Release() {
+func (s *sharedStore) Release() error {
 	if s.refCount.Dec() == 0 && s.tryUnregister() {
-		s.backend.Close()
+		return s.backend.Close()
 	}
+	return nil
 }
 
 // tryUnregister removed the store from the registry. tryUnregister returns false

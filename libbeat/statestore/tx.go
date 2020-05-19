@@ -28,6 +28,7 @@ import (
 // transaction will not be blocked for too long. The backend implements the
 // actual locking strategies.
 type Tx struct {
+	store    string
 	active   bool
 	readonly bool
 	backend  tx
@@ -40,8 +41,8 @@ type tx interface {
 	backend.Tx
 }
 
-func newTx(backend backend.Tx, readonly bool) *Tx {
-	return &Tx{active: true, readonly: readonly, backend: backend}
+func newTx(store string, backend backend.Tx, readonly bool) *Tx {
+	return &Tx{store: store, active: true, readonly: readonly, backend: backend}
 }
 
 func (tx *Tx) close() error {
@@ -81,11 +82,9 @@ func (tx *Tx) Close() (err error) {
 
 // Rollback undoes all changes and closes the current transaction.
 func (tx *Tx) Rollback() error {
-	if !tx.active {
-		return errTxClosed
-	}
-	if tx.readonly {
-		return errTxReadonly
+	const operation = "tx/commit"
+	if err := tx.checkWritable(operation); err != nil {
+		return err
 	}
 
 	return tx.Close()
@@ -93,11 +92,9 @@ func (tx *Tx) Rollback() error {
 
 // Commit applies all local changes and closes the current transaction.
 func (tx *Tx) Commit() error {
-	if !tx.active {
-		return errTxClosed
-	}
-	if tx.readonly {
-		return errTxReadonly
+	const operation = "tx/commit"
+	if err := tx.checkWritable(operation); err != nil {
+		return err
 	}
 
 	defer tx.close()
@@ -107,8 +104,9 @@ func (tx *Tx) Commit() error {
 
 // Has returns true if the key is present in the store.
 func (tx *Tx) Has(key Key) (bool, error) {
-	if !tx.active {
-		return false, errTxClosed
+	const operation = "tx/get"
+	if err := tx.checkClosed(operation); err != nil {
+		return false, err
 	}
 	return tx.backend.Has(backend.Key(key))
 }
@@ -118,8 +116,9 @@ func (tx *Tx) Has(key Key) (bool, error) {
 // or map. The value decoder is alive and can be used multiple times, as long
 // as the owning transaction has not been closed yet.
 func (tx *Tx) Get(key Key) (ValueDecoder, error) {
-	if !tx.active {
-		return nil, errTxClosed
+	const operation = "tx/get"
+	if err := tx.checkClosed(operation); err != nil {
+		return nil, err
 	}
 	return tx.backend.Get(backend.Key(key))
 }
@@ -129,11 +128,9 @@ func (tx *Tx) Get(key Key) (ValueDecoder, error) {
 // The value should be a map or a go struct. During serialization all fields
 // found in val will be added to the inserted document.
 func (tx *Tx) Insert(val interface{}) (Key, error) {
-	if !tx.active {
-		return "", errTxClosed
-	}
-	if tx.readonly {
-		return "", errTxReadonly
+	const operation = "tx/insert"
+	if err := tx.checkWritable(operation); err != nil {
+		return "", err
 	}
 
 	if tx.gen == nil {
@@ -162,13 +159,10 @@ func (tx *Tx) Insert(val interface{}) (Key, error) {
 
 // Remove removes a key-value pair from the store.
 func (tx *Tx) Remove(key Key) error {
-	if !tx.active {
-		return errTxClosed
+	const operation = "tx/remove"
+	if err := tx.checkWritable(operation); err != nil {
+		return err
 	}
-	if tx.readonly {
-		return errTxReadonly
-	}
-
 	return tx.backend.Remove(backend.Key(key))
 }
 
@@ -176,11 +170,9 @@ func (tx *Tx) Remove(key Key) error {
 // The value should be a map or a go struct. During serialization all fields
 // found in val will be added to the inserted document.
 func (tx *Tx) Set(key Key, val interface{}) error {
-	if !tx.active {
-		return errTxClosed
-	}
-	if tx.readonly {
-		return errTxReadonly
+	const operation = "tx/set"
+	if err := tx.checkWritable(operation); err != nil {
+		return err
 	}
 	return tx.backend.Set(backend.Key(key), val)
 }
@@ -190,19 +182,18 @@ func (tx *Tx) Set(key Key, val interface{}) error {
 // The value should be a map or a go struct. During serialization all fields
 // will be added to the document.
 func (tx *Tx) Update(key Key, fields interface{}) error {
-	if !tx.active {
-		return errTxClosed
+	const operation = "tx/update"
+	if err := tx.checkWritable(operation); err != nil {
+		return err
 	}
-	if tx.readonly {
-		return errTxReadonly
-	}
+
 	return tx.backend.Update(backend.Key(key), fields)
 }
 
 // EachKey iterates all entries in a store, calling fn for each found key.
 func (tx *Tx) EachKey(fn func(Key) (bool, error)) error {
-	if !tx.active {
-		return errTxClosed
+	if err := tx.checkClosed("tx/iterate"); err != nil {
+		return err
 	}
 
 	return tx.backend.EachKey(false, func(k backend.Key) (bool, error) {
@@ -212,19 +203,31 @@ func (tx *Tx) EachKey(fn func(Key) (bool, error)) error {
 
 // Each iterates all entries in a store, calling fn for each found key-value pair.
 func (tx *Tx) Each(fn func(Key, ValueDecoder) (bool, error)) error {
-	if !tx.active {
-		return errTxClosed
+	if err := tx.checkClosed("tx/iterate"); err != nil {
+		return err
 	}
+
 	return tx.backend.Each(false, func(k backend.Key, v backend.ValueDecoder) (bool, error) {
 		return fn(Key(k), v)
 	})
 }
 
-func (tx *Tx) internalEach(fn func(Key, ValueDecoder) (bool, error)) error {
+func (tx *Tx) checkClosed(operation string) error {
 	if !tx.active {
-		return errTxClosed
+		return &ErrorTxInvalid{
+			name:      tx.store,
+			operation: operation,
+		}
 	}
-	return tx.backend.Each(true, func(k backend.Key, v backend.ValueDecoder) (bool, error) {
-		return fn(Key(k), v)
-	})
+	return nil
+}
+
+func (tx *Tx) checkWritable(operation string) error {
+	if err := tx.checkClosed(operation); err != nil {
+		return err
+	}
+	if tx.readonly {
+		return &ErrorOperation{name: tx.store, operation: operation, cause: errTxReadonly}
+	}
+	return nil
 }

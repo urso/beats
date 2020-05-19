@@ -34,14 +34,14 @@ func TestTxFailsAfterClose(t *testing.T) {
 			backend := newMockTx()
 			backend.OnRollback().Once().Return(nil)
 			backend.OnClose().Once().Return(nil)
-			tx := newTx(backend, true)
+			tx := newTx("test", backend, true)
 			tx.Close()
 
 			err := op(tx)
 			if err == nil {
 				t.Fatal("Expected operation to fail")
 			}
-			if err != errTxClosed {
+			if _, ok := err.(*ErrorTxInvalid); !ok {
 				t.Fatalf("Expected standard close error, but got: %v", err)
 			}
 		})
@@ -66,7 +66,7 @@ func TestTxNoUpdateOpsOnReadonlyAllowed(t *testing.T) {
 		t.Run(test, func(t *testing.T) {
 			backend := newMockTx()
 
-			tx := newTx(backend, true)
+			tx := newTx("test", backend, true)
 
 			err := op(tx)
 			if err == nil {
