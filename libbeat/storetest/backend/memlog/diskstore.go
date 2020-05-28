@@ -1,4 +1,4 @@
-package memlog2
+package memlog
 
 import (
 	"bufio"
@@ -171,7 +171,7 @@ func (s *diskstore) addOperation(op op) error {
 
 	writer := s.logBuf
 	counting := &countWriter{w: writer}
-	enc := json.NewEncoder(counting)
+	enc := newJSONEncoder(counting)
 	defer func() {
 		s.logFileSize += counting.n
 	}()
@@ -358,7 +358,7 @@ func (s *diskstore) removeOldDataFiles() {
 	s.dataFiles = keep
 }
 
-func encOp(enc *json.Encoder, op op, id uint64) error {
+func encOp(enc *jsonEncoder, op op, id uint64) error {
 	if err := enc.Encode(logAction{
 		Op: op.name(),
 		ID: id,

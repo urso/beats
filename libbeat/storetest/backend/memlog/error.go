@@ -1,4 +1,4 @@
-package memlog2
+package memlog
 
 import "errors"
 
