@@ -25,7 +25,7 @@ type loggerAdapter logp.Logger
 type itemDecoder badger.Item
 
 func New(log *logp.Logger, home string) backend.Registry {
-	return &accessor{home: home}
+	return &accessor{log: log, home: home}
 }
 
 func (*accessor) Close() error { return nil }
