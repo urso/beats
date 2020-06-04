@@ -241,7 +241,7 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 		return err
 	}
 
-	stateStore, err := openStateStore(b.Info, config.Registry)
+	stateStore, err := openStateStore(b.Info, logp.NewLogger("filebeat"), config.Registry)
 	if err != nil {
 		logp.Err("Failed to open state store: %+v", err)
 		return err

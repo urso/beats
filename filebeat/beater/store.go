@@ -22,6 +22,7 @@ import (
 
 	"github.com/elastic/beats/v7/filebeat/config"
 	"github.com/elastic/beats/v7/libbeat/beat"
+	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/paths"
 	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
@@ -33,8 +34,8 @@ type filebeatStore struct {
 	cleanInterval time.Duration
 }
 
-func openStateStore(info beat.Info, cfg config.Registry) (*filebeatStore, error) {
-	memlog, err := memlog.New(memlog.Settings{
+func openStateStore(info beat.Info, logger *logp.Logger, cfg config.Registry) (*filebeatStore, error) {
+	memlog, err := memlog.New(logger, memlog.Settings{
 		Root:     paths.Resolve(paths.Data, cfg.Path),
 		FileMode: cfg.Permissions,
 	})
