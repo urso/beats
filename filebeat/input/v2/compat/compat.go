@@ -103,7 +103,7 @@ func (r *runner) Start() {
 		if err != nil {
 			log.Errorf("Input '%v' failed with: %+v", name, err)
 		} else {
-			log.Info("Input '%v' stopped", name)
+			log.Infof("Input '%v' stopped", name)
 		}
 	}()
 }
