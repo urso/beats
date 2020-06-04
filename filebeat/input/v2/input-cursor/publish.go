@@ -22,6 +22,8 @@ import (
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
+	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
+	"github.com/elastic/beats/v7/libbeat/statestore"
 )
 
 type Publisher interface {
@@ -64,13 +66,23 @@ func (c *cursorPublisher) forward(event beat.Event) error {
 func createUpdateOp(store *store, resource *resource, updates interface{}) (*updateOp, error) {
 	ts := time.Now()
 
-	if err := resource.UpdateCursor(updates); err != nil {
+	resource.stateMutex.Lock()
+	defer resource.stateMutex.Unlock()
+
+	cursor := resource.pendingCursor
+	if resource.activeCursorOperations == 0 {
+		var tmp interface{}
+		typeconv.Convert(&tmp, cursor)
+		resource.pendingCursor = tmp
+		cursor = tmp
+	}
+
+	if err := typeconv.Convert(&cursor, updates); err != nil {
 		return nil, err
 	}
 
 	resource.Retain()
-
-	resource.state.Internal.Updated = ts
+	resource.activeCursorOperations++
 	return &updateOp{
 		resource:  resource,
 		store:     store,
@@ -79,8 +91,39 @@ func createUpdateOp(store *store, resource *resource, updates interface{}) (*upd
 	}, nil
 }
 
-func (op *updateOp) Execute() {
-	defer op.resource.Release()
-	op.store.UpdateCursor(op.resource, op.timestamp, op.delta)
+func (op *updateOp) Execute(n uint) {
+	resource := op.resource
+
+	defer resource.ReleaseN(n)
+
+	resource.stateMutex.Lock()
+	defer resource.stateMutex.Unlock()
+
+	resource.activeCursorOperations -= n
+	if resource.activeCursorOperations == 0 {
+		resource.cursor = resource.pendingCursor
+		resource.pendingCursor = nil
+	} else {
+		typeconv.Convert(&resource.cursor, op.delta)
+	}
+
+	if resource.internalState.Updated.Before(op.timestamp) {
+		resource.internalState.Updated = op.timestamp
+	}
+
+	err := op.store.persistentStore.Set(resource.key, state{
+		TTL:     resource.internalState.TTL,
+		Updated: resource.internalState.Updated,
+		Cursor:  resource.cursor,
+	})
+	if err != nil {
+		if !statestore.IsClosed(err) {
+			op.store.log.Errorf("Failed to update state in the registry for '%v'", resource.key)
+		}
+	} else {
+		resource.internalInSync = true
+		resource.stored = true
+	}
+
 	*op = updateOp{}
 }

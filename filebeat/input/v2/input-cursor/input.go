@@ -132,12 +132,10 @@ func (inp *managedInput) runSource(
 	}
 	defer resource.Unlock()
 
-	// update clean timeout. If the resource is 'new' we will insert it into the registry now.
-	if resource.stored == false || inp.cleanTimeout != resource.state.Internal.TTL {
-		resource.state.Internal.TTL = inp.cleanTimeout
-		store.UpdateInternal(resource)
-	}
+	// Ensure we use the correct TTL by updating it now. If the resource is 'new' we will insert it into the registry now.
+	store.UpdateTTL(resource, inp.cleanTimeout)
 
+	// start the collection
 	cursor := Cursor{store: store, resource: resource}
 	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
@@ -159,25 +157,27 @@ func (c Cursor) Unpack(to interface{}) error {
 	return c.resource.UnpackCursor(to)
 }
 
-func (c Cursor) Migrate(val interface{}) error {
-	return c.store.Migrate(c.resource, val)
-}
-
 func newInputACKHandler(log *logp.Logger) beat.ACKer {
 	return acker.EventPrivateReporter(func(acked int, private []interface{}) {
-		for i := len(private) - 1; i >= 0; i-- {
+		var n uint
+		var last int
+		for i := 0; i < len(private); i++ {
 			current := private[i]
 			if current == nil {
 				continue
 			}
 
-			op, ok := current.(*updateOp)
-			if !ok {
+			if _, ok := current.(*updateOp); !ok {
 				continue
 			}
 
-			op.Execute()
+			n++
+			last = i
+		}
+
+		if n == 0 {
 			return
 		}
+		private[last].(*updateOp).Execute(n)
 	})
 }

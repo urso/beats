@@ -28,7 +28,6 @@ import (
 	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/go-concert"
 	"github.com/elastic/go-concert/unison"
-	"github.com/urso/sderr"
 )
 
 // store encapsulates the persistent store and the in memory state store, that
@@ -61,6 +60,15 @@ type resource struct {
 	// lock guarantees only one input create updates for this entry
 	lock unison.Mutex
 
+	// key of the resource as used for the registry.
+	key string
+
+	// stateMutex is used to lock the resource when it is update/read from
+	// multiple go-routines like the ACK handler or the input publishing an
+	// event.
+	// stateMutex is used to access the fields 'stored', 'state' and 'internalInSync'
+	stateMutex sync.Mutex
+
 	// stored indicates that the state is available in the registry file. It is false for new entries.
 	stored bool
 
@@ -69,12 +77,10 @@ type resource struct {
 	// them on each update operation until we eventually succeeded
 	internalInSync bool
 
-	// key of the resource as used for the registry.
-	key string
-
-	// state contains the cursor state and additional meta-data that is used by the input manager
-	// to track the resource and implement garbage collection support on.
-	state state
+	activeCursorOperations uint
+	internalState          stateInternal
+	cursor                 interface{}
+	pendingCursor          interface{}
 }
 
 type (
@@ -90,8 +96,9 @@ type (
 	// information that are require to identify/track the source we are
 	// collecting from.
 	state struct {
-		Internal stateInternal
-		Cursor   interface{}
+		TTL     time.Duration
+		Updated time.Time
+		Cursor  interface{}
 	}
 
 	stateInternal struct {
@@ -159,17 +166,40 @@ func (s *store) Find(key string, create bool) *resource {
 	return s.ephemeralStore.Find(key, create)
 }
 
+func (s *store) UpdateTTL(resource *resource, ttl time.Duration) {
+	resource.stateMutex.Lock()
+	defer resource.stateMutex.Unlock()
+	if resource.stored && resource.internalState.TTL == ttl {
+		return
+	}
+
+	resource.internalState.TTL = ttl
+	if resource.internalState.Updated.IsZero() {
+		resource.internalState.Updated = time.Now()
+	}
+
+	err := s.persistentStore.Set(resource.key, state{
+		TTL:     resource.internalState.TTL,
+		Updated: resource.internalState.Updated,
+		Cursor:  resource.cursor,
+	})
+	if err != nil {
+		s.log.Errorf("Failed to update resource management fields for '%v'", resource.key)
+		resource.internalInSync = false
+	} else {
+		resource.stored = true
+		resource.internalInSync = true
+	}
+}
+
+/*
 func (s *store) UpdateInternal(resource *resource) {
-	data := resource.state.Internal
+	data := &resource.state
 	if data.Updated.IsZero() {
 		data.Updated = time.Now()
 	}
 
-	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
-		return tx.Update(statestore.Key(resource.key), registryStateUpdateInternal{
-			Internal: data,
-		})
-	})
+	err := s.persistentStore.Set(resource.key, resource.state)
 	if err != nil {
 		s.log.Errorf("Failed to update resource management fields for '%v'", resource.key)
 		resource.internalInSync = false
@@ -205,22 +235,7 @@ func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates in
 	}
 }
 
-func (s *store) Migrate(resource *resource, value interface{}) error {
-	var tmp interface{}
-	if err := typeconv.Convert(&tmp, value); err != nil {
-		return sderr.Wrap(err, "failed to serialized state")
-	}
-
-	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
-		return tx.Set(statestore.Key(resource.key), value)
-	})
-	if err != nil {
-		return sderr.Wrap(err, "failed to set key %{key} to new migrated value: %v", resource.key, value)
-	}
-
-	resource.SetCursor(tmp)
-	return nil
-}
+*/
 
 func (s *states) Find(key string, create bool) *resource {
 	s.mu.Lock()
@@ -240,41 +255,50 @@ func (s *states) Find(key string, create bool) *resource {
 		stored: false,
 		key:    key,
 		lock:   unison.MakeMutex(),
-		state:  state{},
 	}
 	s.table[key] = resource
 	resource.Retain()
 	return resource
 }
 
-func (e *resource) IsNew() bool {
-	return e.state.Cursor == nil
+func (r *resource) IsNew() bool {
+	return r.pendingCursor == nil
 }
 
 // Retain is used to indicate that 'resource' gets an additional 'owner'.
 // Owners of an resource can be active inputs or pending update operations
 // not yet written to disk.
-func (e *resource) Retain() { e.pending.Inc() }
+func (r *resource) Retain() { r.pending.Inc() }
 
 // Release reduced the owner ship counter of the resource.
-func (e *resource) Release() { e.pending.Dec() }
+func (r *resource) Release() { r.pending.Dec() }
+
+func (r *resource) ReleaseN(n uint) {
+	r.pending.Sub(uint64(n))
+}
 
 // Finished returns true if the resource is not in use and if there are no pending updates
 // that still need to be written to the registry.
-func (e *resource) Finished() bool { return e.pending.Load() == 0 }
+func (r *resource) Finished() bool { return r.pending.Load() == 0 }
 
 // Unlock removes the exclusive access to the resource and gives up ownership.
 // The input must not use the resource anymore after 'unlock' Only pending update operations
 // will continue to excert ownership.
-func (e *resource) Unlock() {
-	e.lock.Unlock()
-	e.Release()
+func (r *resource) Unlock() {
+	r.lock.Unlock()
+	r.Release()
 }
 
-func (e *resource) UnpackCursor(to interface{}) error {
-	return typeconv.Convert(to, e.state.Cursor)
+func (r *resource) UnpackCursor(to interface{}) error {
+	r.stateMutex.Lock()
+	defer r.stateMutex.Unlock()
+	if r.activeCursorOperations == 0 {
+		return typeconv.Convert(to, r.cursor)
+	}
+	return typeconv.Convert(to, r.pendingCursor)
 }
 
+/*
 func (e *resource) SetCursor(c interface{}) {
 	e.state.Cursor = c
 }
@@ -282,6 +306,7 @@ func (e *resource) SetCursor(c interface{}) {
 func (e *resource) UpdateCursor(val interface{}) error {
 	return typeconv.Convert(&e.state.Cursor, val)
 }
+*/
 
 func readStates(log *logp.Logger, store *statestore.Store, prefix string) (*states, error) {
 	keyPrefix := prefix + "::"
@@ -289,30 +314,32 @@ func readStates(log *logp.Logger, store *statestore.Store, prefix string) (*stat
 		table: map[string]*resource{},
 	}
 
-	// load 'local' states into memory
-	err := store.View(func(tx *statestore.Tx) error {
-		return tx.Each(func(k statestore.Key, dec statestore.ValueDecoder) (bool, error) {
-			if !strings.HasPrefix(string(k), keyPrefix) {
-				return true, nil
-			}
-
-			var st state
-			if err := dec.Decode(&st); err != nil {
-				log.Errorf("Failed to read regisry state for '%v', cursor state will be ignored. Error was: %+v",
-					k, err)
-				return true, nil
-			}
-
-			resource := &resource{
-				key:    string(k),
-				stored: true,
-				lock:   unison.MakeMutex(),
-				state:  st,
-			}
-			states.table[resource.key] = resource
-
+	err := store.Each(func(key string, dec statestore.ValueDecoder) (bool, error) {
+		if !strings.HasPrefix(string(key), keyPrefix) {
 			return true, nil
-		})
+		}
+
+		var st state
+		if err := dec.Decode(&st); err != nil {
+			log.Errorf("Failed to read regisry state for '%v', cursor state will be ignored. Error was: %+v",
+				key, err)
+			return true, nil
+		}
+
+		resource := &resource{
+			key:            key,
+			stored:         true,
+			lock:           unison.MakeMutex(),
+			internalInSync: true,
+			internalState: stateInternal{
+				TTL:     st.TTL,
+				Updated: st.Updated,
+			},
+			cursor: st.Cursor,
+		}
+		states.table[resource.key] = resource
+
+		return true, nil
 	})
 
 	if err != nil {

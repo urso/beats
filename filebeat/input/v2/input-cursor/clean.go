@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/go-concert/unison"
 )
 
@@ -76,28 +75,17 @@ func (c *cleaner) cleanup(started time.Time, store *store) {
 	// keys stores all resource keys to delete. The bool indicates if the key was
 	// already written to the registry file, or if the resource is still in
 	// memory only (e.g. due to IO errors).
-	keys := map[string]bool{}
+	keys := map[string]struct{}{}
 	numStored := 0
 
 	for key, resource := range states.table {
-		if !resource.Finished() {
+		clean := checkCleanResource(started, now, resource)
+		if !clean {
+			// do not clean the resource if it is still live or not serialized to the persistent store yet.
 			continue
 		}
-
-		ttl := resource.state.Internal.TTL
-		reference := resource.state.Internal.Updated
-		if started.After(reference) {
-			reference = started
-		}
-
-		if reference.Add(ttl).After(now) {
-			continue
-		}
-
-		keys[key] = resource.stored
-		if resource.stored {
-			numStored++
-		}
+		keys[key] = struct{}{}
+		numStored++
 	}
 
 	if len(keys) == 0 {
@@ -107,25 +95,33 @@ func (c *cleaner) cleanup(started time.Time, store *store) {
 
 	// try to delete entries from the registry and internal state storage
 	if numStored > 0 {
-		err := store.persistentStore.Update(func(tx *statestore.Tx) error {
-			for k, stored := range keys {
-				if !stored {
-					continue
-				}
-
-				if err := tx.Remove(statestore.Key(k)); err != nil {
-					return err
-				}
+		for k := range keys {
+			err := store.persistentStore.Remove(string(k))
+			if err != nil {
+				c.log.Errorf("Failed to remove entries from the registry: %+v", err)
+				return
 			}
-			return nil
-		})
-		if err != nil {
-			c.log.Errorf("Failed to remove entries from the registry: %+v", err)
-			return
 		}
 	}
 
 	for key := range keys {
 		delete(states.table, key)
 	}
+}
+
+func checkCleanResource(started, now time.Time, resource *resource) bool {
+	if !resource.Finished() {
+		return false
+	}
+
+	resource.stateMutex.Lock()
+	defer resource.stateMutex.Unlock()
+
+	ttl := resource.internalState.TTL
+	reference := resource.internalState.Updated
+	if started.After(reference) {
+		reference = started
+	}
+
+	return reference.Add(ttl).Before(now) && resource.stored
 }
