@@ -203,10 +203,10 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 
 	states = resetStates(fixStates(states))
 
-	registryBackend, err := memlog.New(memlog.Settings{
+	registryBackend, err := memlog.New(logp.NewLogger("migration"), memlog.Settings{
 		Root:       home,
 		FileMode:   perm,
-		Checkpoint: func(_ uint, _ uint) bool { return true },
+		Checkpoint: func(_ uint64) bool { return true },
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to create new registry backend")
@@ -221,10 +221,7 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 	}
 	defer store.Close()
 
-	err = store.Update(func(tx *statestore.Tx) error {
-		return writeStateUpdates(tx, states)
-	})
-	if err != nil {
+	if err := writeStates(store, states); err != nil {
 		return errors.Wrap(err, "failed to migrate registry states")
 	}
 

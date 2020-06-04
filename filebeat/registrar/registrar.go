@@ -19,6 +19,7 @@ package registrar
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,10 @@ type successLogger interface {
 	Published(n int) bool
 }
 
+type StateStore interface {
+	Access() (*statestore.Store, error)
+}
+
 var (
 	statesUpdate    = monitoring.NewInt(nil, "registrar.states.update")
 	statesCleanup   = monitoring.NewInt(nil, "registrar.states.cleanup")
@@ -60,9 +65,7 @@ var (
 	registrySuccess = monitoring.NewInt(nil, "registrar.writes.success")
 )
 
-type StateStore interface {
-	Access() (*statestore.Store, error)
-}
+const fileStatePrefix = "filebeat::logs::"
 
 // New creates a new Registrar instance, updating the registry file on
 // `file.State` updates. New fails if the file can not be opened or created.
@@ -139,9 +142,6 @@ func (r *Registrar) Run() {
 		timer  *time.Timer
 		flushC <-chan time.Time
 
-		pending    []file.State
-		pendingMap = map[string]int{}
-
 		directIn  chan []file.State
 		collectIn chan []file.State
 	)
@@ -161,11 +161,7 @@ func (r *Registrar) Run() {
 		case states := <-directIn:
 			// no flush timeout configured. Directly update registry
 			r.onEvents(states)
-			err := r.store.Update(func(tx *statestore.Tx) error {
-				writeStateUpdates(tx, states)
-				return nil
-			})
-			if err != nil {
+			if err := r.commitStateUpdates(); err != nil {
 				r.failing(err)
 				return
 			}
@@ -174,58 +170,39 @@ func (r *Registrar) Run() {
 			// flush timeout configured. Only update internal state and track pending
 			// updates to be written to registry.
 			r.onEvents(states)
-			for i := range states {
-				id := states[i].ID()
-				if idx, exists := pendingMap[id]; exists {
-					pending[idx] = states[i]
-				} else {
-					idx := len(pending)
-					pending = append(pending, states[i])
-					pendingMap[id] = idx
-				}
-			}
-
-			if flushC == nil && len(pending) > 0 {
+			if flushC == nil && len(states) > 0 {
 				timer = time.NewTimer(r.flushTimeout)
 				flushC = timer.C
 			}
 
 		case <-flushC:
 			timer.Stop()
-			err := r.store.Update(func(tx *statestore.Tx) error {
-				writeStateUpdates(tx, pending)
-				return nil
-			})
-			if err != nil {
+			if err := r.commitStateUpdates(); err != nil {
 				r.failing(err)
 				return
 			}
 
-			pending = nil
-			pendingMap = map[string]int{}
 			flushC = nil
 			timer = nil
 		}
 	}
 }
 
-func (r *Registrar) commit(tx *statestore.Tx) error {
-	defer tx.Close()
-
+func (r *Registrar) commitStateUpdates() error {
 	// First clean up states
-	r.gcStates(tx)
+	r.gcStates()
 	states := r.states.GetStates()
 	statesCurrent.Set(int64(len(states)))
 
 	registryWrites.Inc()
 
-	if err := tx.Commit(); err != nil {
-		logp.Err("Failed to write registry state: %+v", err)
-		return err
-	}
-
 	logp.Debug("registrar", "Registry file updated. %d active states.", len(states))
 	registrySuccess.Inc()
+
+	if err := writeStates(r.store, states); err != nil {
+		logp.Err("Error writing registrar state to statestore: %v", err)
+	}
+
 	return nil
 }
 
@@ -262,7 +239,7 @@ func (r *Registrar) onEvents(states []file.State) {
 // registry can be gc'ed in the future. If no potential removable state is found,
 // the gcEnabled flag is set to false, indicating the current registrar state being
 // stable. New registry update events can re-enable state gc'ing.
-func (r *Registrar) gcStates(tx *statestore.Tx) {
+func (r *Registrar) gcStates() {
 	if !r.gcRequired {
 		return
 	}
@@ -270,7 +247,7 @@ func (r *Registrar) gcStates(tx *statestore.Tx) {
 	beforeCount := r.states.Count()
 	cleanedStates, pendingClean := r.states.CleanupWith(func(id string) {
 		// TODO: report error
-		tx.Remove(statestore.Key(id))
+		r.store.Remove(id)
 	})
 	statesCleanup.Add(int64(cleanedStates))
 
@@ -296,23 +273,25 @@ func (r *Registrar) processEventStates(states []file.State) {
 func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 	var states []file.State
 
-	err := store.View(func(tx *statestore.Tx) error {
-		return tx.Each(func(k statestore.Key, v statestore.ValueDecoder) (bool, error) {
-			var st file.State
-
-			// try to decode. Ingore faulty/incompatible values.
-			if err := v.Decode(&st); err != nil {
-				// XXX: Do we want to log here? In case we start to store other
-				// state types in the registry, then this operation will likely fail
-				// quite often, producing some false-positives in the logs...
-				return true, nil
-			}
-
-			st.Id = string(k)
-			states = append(states, st)
+	err := store.Each(func(key string, dec statestore.ValueDecoder) (bool, error) {
+		if strings.HasPrefix(key, fileStatePrefix) {
 			return true, nil
-		})
+		}
+
+		// try to decode. Ingore faulty/incompatible values.
+		var st file.State
+		if err := dec.Decode(&st); err != nil {
+			// XXX: Do we want to log here? In case we start to store other
+			// state types in the registry, then this operation will likely fail
+			// quite often, producing some false-positives in the logs...
+			return true, nil
+		}
+
+		st.Id = key
+		states = append(states, st)
+		return true, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -321,9 +300,10 @@ func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 	return states, nil
 }
 
-func writeStateUpdates(tx *statestore.Tx, states []file.State) error {
+func writeStates(store *statestore.Store, states []file.State) error {
 	for i := range states {
-		if err := tx.Set(statestore.Key(states[i].ID()), states[i]); err != nil {
+		key := fileStatePrefix + states[i].ID()
+		if err := store.Set(key, states[i]); err != nil {
 			return err
 		}
 	}
