@@ -156,7 +156,7 @@ func (s *store) logOperation(op op) error {
 
 func (s *store) Each(fn func(string, backend.ValueDecoder) (bool, error)) error {
 	s.lock.RLock()
-	defer s.lock.RLock()
+	defer s.lock.RUnlock()
 
 	for k, entry := range s.mem.table {
 		cont, err := fn(k, entry)

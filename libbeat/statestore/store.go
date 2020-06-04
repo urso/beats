@@ -66,6 +66,7 @@ func (s *Store) Close() error {
 		return &ErrorClosed{operation: "store/close", name: s.shared.name}
 	}
 	s.active.Close()
+	s.active.Done()
 
 	s.active.Wait()
 	return s.shared.Release()
