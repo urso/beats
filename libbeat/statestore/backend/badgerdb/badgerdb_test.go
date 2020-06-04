@@ -1,4 +1,4 @@
-package memlog
+package badgerdb
 
 import (
 	"testing"
@@ -14,6 +14,7 @@ func init() {
 
 func TestCompliance(t *testing.T) {
 	storetests.TestBackendCompliance(t, func(testPath string) (backend.Registry, error) {
-		return New(logp.NewLogger("test"), Settings{Root: testPath})
+		logger := logp.NewLogger("test")
+		return New(logger, testPath), nil
 	})
 }

@@ -35,15 +35,9 @@ type Registry struct {
 	wg     sync.WaitGroup
 }
 
-// Key is the type used for all keys in a store.
-// type Key []byte
-type Key string
-
 // ValueDecoder is used to decode retrieved from an actual store.  A
 // ValueDecoder instance is valid for the lifetime of the transaction only.
-type ValueDecoder interface {
-	Decode(to interface{}) error
-}
+type ValueDecoder = backend.ValueDecoder
 
 // NewRegistry creates a new Registry with a configured backend.
 func NewRegistry(backend backend.Registry) *Registry {

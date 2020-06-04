@@ -18,9 +18,8 @@
 package statestore
 
 import (
-	"github.com/elastic/beats/v7/libbeat/common/atomic"
-	"github.com/elastic/beats/v7/libbeat/common/cleanup"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend"
+	"github.com/elastic/go-concert/atomic"
 	"github.com/elastic/go-concert/unison"
 )
 
@@ -38,8 +37,9 @@ type sharedStore struct {
 // A Store is not thread-safe. Each go-routine accessing a store should create
 // an instance using `Registry.Get`.
 type Store struct {
-	shared   *sharedStore
-	activeTx unison.SafeWaitGroup // active transaction
+	shared *sharedStore
+	// wait group to ensure active operations can finish, but not started anymore after the store has been closed.
+	active unison.SafeWaitGroup
 }
 
 func newSharedStore(reg *Registry, name string, backend backend.Store) *sharedStore {
@@ -62,89 +62,91 @@ func newStore(shared *sharedStore) *Store {
 // Already active transaction will continue to function until Closed.
 // The backing store will be closed once all stores and active transactions have been closed.
 func (s *Store) Close() error {
-	if err := s.activeTx.Add(1); err != nil {
+	if err := s.active.Add(1); err != nil {
 		return &ErrorClosed{operation: "store/close", name: s.shared.name}
 	}
-	s.activeTx.Done()
+	s.active.Close()
 
-	s.activeTx.Wait()
+	s.active.Wait()
 	return s.shared.Release()
 }
 
-// Begin starts a new transaction within the current store.
-// The store ref-counter is increased, such that the final close on a store
-// will only happen if all transaction have been closed as well.
-// A transaction started with `Begin` must be closed, rolled back or comitted.
-// For 'local' transaction and/or guarantees that `Close`, `Rollback`, or `Commit`
-// is called correctly use the `Update` or `View` methods.
-func (s *Store) Begin(readonly bool) (*Tx, error) {
-	const operation = "store/begin-tx"
-
-	if err := s.activeTx.Add(1); err != nil {
-		return nil, &ErrorClosed{operation: operation, name: s.shared.name}
+func (s *Store) Has(key string) (bool, error) {
+	const operation = "store/has"
+	if err := s.active.Add(1); err != nil {
+		return false, &ErrorClosed{operation: operation, name: s.shared.name}
 	}
+	defer s.active.Done()
 
-	ok := false
-	defer cleanup.IfNot(&ok, s.activeTx.Done)
-
-	backendTx, err := s.shared.backend.Begin(readonly)
+	has, err := s.shared.backend.Has((key))
 	if err != nil {
-		return nil, &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
+		return false, &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
 	}
-
-	mode := txWritable
-	if readonly {
-		mode = txReadonly
-	}
-
-	tx := &Tx{
-		store:    s.shared.name,
-		mode:     mode,
-		backend:  backendTx,
-		finishCB: s.finishTx,
-	}
-	ok = true
-	return tx, nil
+	return has, nil
 }
 
-// Update runs fn within a writeable transaction. The transaction will be
-// rolled back if fn panics or returns an error.
-// The transaction will be comitted if fn returns without error.
-func (s *Store) Update(fn func(tx *Tx) error) error {
-	const operation = "store/update"
+func (s *Store) Get(key string, into interface{}) error {
+	const operation = "store/get"
+	if err := s.active.Add(1); err != nil {
+		return &ErrorClosed{operation: operation, name: s.shared.name}
+	}
+	defer s.active.Done()
 
-	tx, err := s.Begin(false)
+	err := s.shared.backend.Get(key, into)
 	if err != nil {
-		return err
-	}
-
-	defer tx.Close()
-	if err := fn(tx); err != nil {
-		tx.Rollback()
-		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
-	}
-	return tx.Commit()
-}
-
-// View executes a readonly transaction. An error is return if the readonly
-// transaction can not be generated or fn returns an error.
-func (s *Store) View(fn func(tx *Tx) error) error {
-	const operation = "store/view"
-
-	tx, err := s.Begin(true)
-	if err != nil {
-		return err
-	}
-
-	defer tx.Close()
-	if err := fn(tx); err != nil {
 		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
 	}
 	return nil
 }
 
-func (s *Store) finishTx() {
-	s.activeTx.Done()
+func (s *Store) Set(key string, from interface{}) error {
+	const operation = "store/get"
+	if err := s.active.Add(1); err != nil {
+		return &ErrorClosed{operation: operation, name: s.shared.name}
+	}
+	defer s.active.Done()
+
+	if err := s.shared.backend.Set((key), from); err != nil {
+		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
+	}
+	return nil
+}
+
+/*
+func (s *Store) Update(key string, value interface{}) error {
+	const operation = "store/update"
+	if err := s.activeTx.Add(1); err != nil {
+		return &ErrorClosed{operation: operation, name: s.shared.name}
+	}
+	defer s.activeTx.Done()
+
+	if err := s.shared.backend.Update((key), value); err != nil {
+		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
+	}
+	return nil
+}
+*/
+
+func (s *Store) Remove(key string) error {
+	const operation = "store/remove"
+	if err := s.active.Add(1); err != nil {
+		return &ErrorClosed{operation: operation, name: s.shared.name}
+	}
+	defer s.active.Done()
+
+	if err := s.shared.backend.Remove((key)); err != nil {
+		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
+	}
+	return nil
+}
+
+func (s *Store) Each(fn func(string, ValueDecoder) (bool, error)) error {
+	if err := s.active.Add(1); err != nil {
+		return &ErrorClosed{operation: "store/each", name: s.shared.name}
+	}
+	defer s.active.Done()
+
+	return s.shared.backend.Each(fn)
 }
 
 func (s *sharedStore) Retain() {
@@ -170,4 +172,10 @@ func (s *sharedStore) tryUnregister() bool {
 
 	s.reg.unregisterStore(s)
 	return true
+}
+
+func ifNot(b *bool, fn func()) {
+	if !(*b) {
+		fn()
+	}
 }

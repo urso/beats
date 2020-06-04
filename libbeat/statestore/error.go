@@ -66,24 +66,6 @@ func (e *ErrorClosed) Error() string {
 	return fmt.Sprintf("can not executed %v operation on closed store '%v'", e.operation, e.name)
 }
 
-// ErrorTxInvalid indicates that the operation failed because the transaction is not valid anymore,
-// because the transaction has already been rolled back, committed, or closed.
-type ErrorTxInvalid struct {
-	name      string
-	operation string
-}
-
-// Store reports the name of the store that the transaction used to be active for.
-func (e *ErrorTxInvalid) Store() string { return e.name }
-
-// Operation returns a 'readable' name for the operation that failed because of the invalid transaction.
-func (e *ErrorTxInvalid) Operation() string { return e.operation }
-
-// Error creates a descriptive error string.
-func (e *ErrorTxInvalid) Error() string {
-	return fmt.Sprintf("can not executed %v operation on closed transaction accessing %v", e.operation, e.name)
-}
-
 // ErrorOperation is returned when a generic store operation failed.
 type ErrorOperation struct {
 	name      string

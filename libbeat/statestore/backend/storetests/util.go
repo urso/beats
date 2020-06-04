@@ -1,21 +1,4 @@
-// Licensed to Elasticsearch B.V. under one or more contributor
-// license agreements. See the NOTICE file distributed with
-// this work for additional information regarding copyright
-// ownership. Elasticsearch B.V. licenses this file to you under
-// the Apache License, Version 2.0 (the "License"); you may
-// not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-package cptest
+package storetests
 
 import (
 	"fmt"
@@ -23,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/elastic/beats/v7/libbeat/statestore/backend"
+	"github.com/elastic/beats/v7/libbeat/common/cleanup"
 )
 
 // RunWithPath uses the factory to create and configure a registry with a
@@ -31,9 +14,9 @@ import (
 // The registry is closed once the test finishes and the temporary is deleted
 // afterwards (unless the `-keep` CLI flag is used).
 func RunWithPath(t *testing.T, factory BackendFactory, fn func(*Registry)) {
-	WithPath(factory, func(_ *testing.T, reg *Registry) {
-		fn(reg)
-	})(t)
+	reg, cleanup := SetupRegistry(t, factory)
+	defer cleanup()
+	fn(reg)
 }
 
 // WithPath wraps a registry aware test function into a normalized test
@@ -43,23 +26,38 @@ func RunWithPath(t *testing.T, factory BackendFactory, fn func(*Registry)) {
 // if the test function returns or panics.
 func WithPath(factory BackendFactory, fn func(*testing.T, *Registry)) func(t *testing.T) {
 	return func(t *testing.T) {
-		path, err := ioutil.TempDir(defaultTempDir, "")
-		if err != nil {
-			t.Fatalf("Failed to create temporary test directory: %v", err)
-		}
+		reg, cleanup := SetupRegistry(t, factory)
+		defer cleanup()
+		fn(t, reg)
+	}
+}
 
-		t.Logf("Test tmp dir: %v", path)
+func SetupRegistry(t testing.TB, factory BackendFactory) (*Registry, func()) {
+	path, err := ioutil.TempDir(defaultTempDir, "")
+	if err != nil {
+		t.Fatalf("Failed to create temporary test directory: %v", err)
+	}
+
+	ok := false
+
+	t.Logf("Test tmp dir: %v", path)
+	if !keepTmpDir {
+		defer cleanup.IfNot(&ok, func() {
+			os.RemoveAll(path)
+		})
+	}
+
+	reg, err := factory(path)
+	if err != nil {
+		t.Fatalf("Failed to create registry: %v", err)
+	}
+
+	ok = true
+	return &Registry{T: t, Registry: reg}, func() {
 		if !keepTmpDir {
 			defer os.RemoveAll(path)
 		}
-
-		reg, err := factory(path)
-		if err != nil {
-			t.Fatalf("Failed to create registry: %v", err)
-		}
-		defer reg.Close()
-
-		fn(t, &Registry{T: t, Registry: reg})
+		reg.Close()
 	}
 }
 
@@ -67,9 +65,9 @@ func WithPath(factory BackendFactory, fn func(*testing.T, *Registry)) func(t *te
 // is used with fn.  The temporary directory used for the store is deleted once
 // fn returns.
 func RunWithStore(t *testing.T, factory BackendFactory, fn func(*Store)) {
-	WithStore(factory, func(_ *testing.T, store *Store) {
-		fn(store)
-	})(t)
+	store, cleanup := SetupTestStore(t, factory)
+	defer cleanup()
+	fn(store)
 }
 
 // WithStore wraps a store aware test function into a normalized test function
@@ -77,23 +75,26 @@ func RunWithStore(t *testing.T, factory BackendFactory, fn func(*Store)) {
 // create and pass a test store (named "test") to the test function. The test
 // store is closed once the test function returns or panics.
 func WithStore(factory BackendFactory, fn func(*testing.T, *Store)) func(*testing.T) {
-	return WithPath(factory, func(t *testing.T, reg *Registry) {
-		store := reg.Access("test")
-		defer store.Close()
+	return func(t *testing.T) {
+		store, cleanup := SetupTestStore(t, factory)
+		defer cleanup()
 		fn(t, store)
-	})
-}
-
-func makeKey(s string) backend.Key {
-	return backend.Key(s)
-}
-
-func makeKeys(n int) []backend.Key {
-	keys := make([]backend.Key, n)
-	for i := range keys {
-		keys[i] = makeKey(fmt.Sprintf("key%v", i))
 	}
-	return keys
+}
+
+func SetupTestStore(t testing.TB, factory BackendFactory) (*Store, func()) {
+	reg, cleanupReg := SetupRegistry(t, factory)
+	store, err := reg.Access("test")
+	if err != nil {
+		defer cleanupReg()
+		must(t, err, "failed to create test store")
+		return nil, nil
+	}
+
+	return store, func() {
+		defer cleanupReg()
+		store.Close()
+	}
 }
 
 func withBackend(factory BackendFactory, fn func(*testing.T, BackendFactory)) func(*testing.T) {
@@ -117,8 +118,8 @@ func withBools(name string, fn func(*testing.T, bool)) func(t *testing.T) {
 	}
 }
 
-func must(t *testing.T, err error, msg string) {
+func must(t testing.TB, err error, msg string, args ...interface{}) {
 	if err != nil {
-		t.Fatal(msg, ":", err)
+		t.Fatal(fmt.Sprintf(msg, args...), ":", err)
 	}
 }
