@@ -2,9 +2,12 @@ package badgerdb
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/dgraph-io/badger"
+	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend"
 	"github.com/elastic/go-structform/cborl"
@@ -24,6 +27,18 @@ type loggerAdapter logp.Logger
 
 type itemDecoder badger.Item
 
+var encodeOptions = []gotype.FoldOption{
+	gotype.Folders(
+		typeconv.FoldTimestampToArray,
+	),
+}
+
+var decodeOptions = []gotype.UnfoldOption{
+	gotype.Unfolders(
+		typeconv.TimestampArrayUnfolder,
+	),
+}
+
 func New(log *logp.Logger, home string) backend.Registry {
 	return &accessor{log: log, home: home}
 }
@@ -32,8 +47,18 @@ func (*accessor) Close() error { return nil }
 
 func (a *accessor) Access(name string) (backend.Store, error) {
 	logger := a.log.With("store", name)
-
 	path := filepath.Join(a.home, name)
+
+	fi, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(path, os.ModeDir|0770)
+		if err != nil {
+			return nil, err
+		}
+	} else if !fi.Mode().IsDir() {
+		return nil, fmt.Errorf("'%v' is no directory", path)
+	}
+
 	db, err := badger.Open(badger.DefaultOptions(path).WithLogger((*loggerAdapter)(logger)))
 	if err != nil {
 		return nil, err
@@ -78,7 +103,7 @@ func (s *store) Get(key string, into interface{}) error {
 
 func (s *store) Set(key string, from interface{}) error {
 	var buf bytes.Buffer
-	if err := gotype.Fold(from, cborl.NewVisitor(&buf)); err != nil {
+	if err := gotype.Fold(from, cborl.NewVisitor(&buf), encodeOptions...); err != nil {
 		return err
 	}
 
@@ -102,7 +127,7 @@ func (s *store) Each(fn func(string, backend.ValueDecoder) (bool, error)) error 
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
 
-		for ; it.Valid(); it.Next() {
+		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			cont, err := fn(string(item.Key()), (*itemDecoder)(item))
 			if !cont || err != nil {
@@ -132,7 +157,7 @@ func (l *loggerAdapter) Warningf(msg string, args ...interface{}) {
 
 func (dec *itemDecoder) Decode(to interface{}) error {
 	item := (*badger.Item)(dec)
-	visitor, err := gotype.NewUnfolder(to)
+	visitor, err := gotype.NewUnfolder(to, decodeOptions...)
 	if err != nil {
 		return err
 	}
