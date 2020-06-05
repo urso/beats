@@ -181,9 +181,19 @@ func (s *diskstore) addOperation(op op) error {
 		s.logInvalid = true
 	})
 
-	if err := encOp(enc, op, s.txid+1); err != nil {
+	if err := enc.Encode(logAction{
+		Op: op.name(),
+		ID: s.txid + 1,
+	}); err != nil {
 		return err
 	}
+	writer.WriteByte('\n')
+
+	if err := enc.Encode(op); err != nil {
+		return err
+	}
+	writer.WriteByte('\n')
+
 	if err := writer.Flush(); err != nil {
 		return err
 	}
@@ -358,16 +368,6 @@ func (s *diskstore) removeOldDataFiles() {
 	s.dataFiles = keep
 }
 
-func encOp(enc *jsonEncoder, op op, id uint64) error {
-	if err := enc.Encode(logAction{
-		Op: op.name(),
-		ID: id,
-	}); err != nil {
-		return err
-	}
-	return enc.Encode(op)
-}
-
 // activeDataFile returns the most recent data file in a list of present (sorted)
 // data files.
 func activeDataFile(infos []dataFileInfo) (string, uint64) {
@@ -479,11 +479,6 @@ func loadLogFile(
 		case *opSet:
 			entries++
 			store.Set(op.K, op.V)
-			/*
-				case *opUpdate:
-					entries++
-					store.Update(op.K, op.V)
-			*/
 		case *opRemove:
 			entries++
 			store.Remove(op.K)
@@ -517,10 +512,6 @@ func readLogFile(home string, fn func(op, uint64) error) error {
 		switch act.Op {
 		case opValSet:
 			op = &opSet{}
-			/*
-				case opValUpdate:
-					op = &opUpdate{}
-			*/
 		case opValRemove:
 			op = &opRemove{}
 		}

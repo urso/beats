@@ -108,27 +108,14 @@ func (s *store) Set(key string, value interface{}) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if err := s.mem.Set(key, value); err != nil {
+	var tmp common.MapStr
+	if err := typeconv.Convert(&tmp, value); err != nil {
 		return err
 	}
 
-	return s.logOperation(&opSet{K: key, V: value})
+	s.mem.Set(key, tmp)
+	return s.logOperation(&opSet{K: key, V: tmp})
 }
-
-/*
-Update would be nice to have, to only updated selected fields, but
-this operation is not well supported by most embedded KV-stores.
-func (s *store) Update(key string, value interface{}) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if err := s.mem.Update(key, value); err != nil {
-		return err
-	}
-
-	return s.logOperation(&opUpdate{K: key, V: value})
-}
-*/
 
 func (s *store) Remove(key string) error {
 	s.lock.Lock()
@@ -181,32 +168,9 @@ func (m *memstore) Get(key string) backend.ValueDecoder {
 	return entry
 }
 
-func (m *memstore) Set(key string, value interface{}) error {
-	var tmp common.MapStr
-	if err := typeconv.Convert(&tmp, value); err != nil {
-		return err
-	}
-
-	m.table[key] = entry{value: tmp}
-
-	return nil
+func (m *memstore) Set(key string, value common.MapStr) {
+	m.table[key] = entry{value: value}
 }
-
-/*
-func (m *memstore) Update(key string, value interface{}) error {
-	entry := m.table[key]
-	if entry == nil {
-		return m.Set(key, value)
-	}
-
-	tmp := entry.value.Clone()
-	if err := typeconv.Convert(&tmp, value); err != nil {
-		return err
-	}
-	entry.value = tmp
-	return nil
-}
-*/
 
 func (m *memstore) Remove(key string) bool {
 	_, exists := m.table[key]

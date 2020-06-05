@@ -1,5 +1,7 @@
 package memlog
 
+import "github.com/elastic/beats/v7/libbeat/common"
+
 type (
 	op interface {
 		name() string
@@ -7,15 +9,8 @@ type (
 
 	opSet struct {
 		K string
-		V interface{}
+		V common.MapStr
 	}
-
-	/*
-		opUpdate struct {
-			K string
-			V interface{}
-		}
-	*/
 
 	opRemove struct {
 		K string
@@ -24,12 +19,9 @@ type (
 
 // operation type names
 const (
-	opValSet = "Set"
-	// opValUpdate = "update"
+	opValSet    = "Set"
 	opValRemove = "remove"
 )
 
 func (*opSet) name() string    { return opValSet }
 func (*opRemove) name() string { return opValRemove }
-
-// func (*opUpdate) name() string { return opValUpdate }
