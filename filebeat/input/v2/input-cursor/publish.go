@@ -76,10 +76,10 @@ func createUpdateOp(store *store, resource *resource, updates interface{}) (*upd
 		resource.pendingCursor = tmp
 		cursor = tmp
 	}
-
 	if err := typeconv.Convert(&cursor, updates); err != nil {
 		return nil, err
 	}
+	resource.pendingCursor = cursor
 
 	resource.Retain()
 	resource.activeCursorOperations++

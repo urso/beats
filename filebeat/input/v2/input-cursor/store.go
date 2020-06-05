@@ -262,7 +262,9 @@ func (s *states) Find(key string, create bool) *resource {
 }
 
 func (r *resource) IsNew() bool {
-	return r.pendingCursor == nil
+	r.stateMutex.Lock()
+	defer r.stateMutex.Unlock()
+	return r.pendingCursor == nil && r.cursor == nil
 }
 
 // Retain is used to indicate that 'resource' gets an additional 'owner'.
