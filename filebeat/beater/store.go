@@ -25,7 +25,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/paths"
 	"github.com/elastic/beats/v7/libbeat/statestore"
-	"github.com/elastic/beats/v7/libbeat/statestore/backend/memlog"
+	"github.com/elastic/beats/v7/libbeat/statestore/backend/badgerdb"
 )
 
 type filebeatStore struct {
@@ -35,16 +35,11 @@ type filebeatStore struct {
 }
 
 func openStateStore(info beat.Info, logger *logp.Logger, cfg config.Registry) (*filebeatStore, error) {
-	memlog, err := memlog.New(logger, memlog.Settings{
-		Root:     paths.Resolve(paths.Data, cfg.Path),
-		FileMode: cfg.Permissions,
-	})
-	if err != nil {
-		return nil, err
-	}
+	home := paths.Resolve(paths.Data, cfg.Path)
+	bdb := badgerdb.New(logger, home)
 
 	return &filebeatStore{
-		registry:      statestore.NewRegistry(memlog),
+		registry:      statestore.NewRegistry(bdb),
 		storeName:     info.Beat,
 		cleanInterval: cfg.CleanInterval,
 	}, nil
