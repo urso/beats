@@ -57,6 +57,12 @@ func New(log *logp.Logger, settings Settings) (*Registry, error) {
 		settings.BufferSize = defaultBufferSize
 	}
 
+	root, err := filepath.Abs(settings.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	settings.Root = root
 	return &Registry{
 		log:      log,
 		active:   true,

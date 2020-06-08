@@ -105,13 +105,13 @@ func (s *store) Get(key string, into interface{}) error {
 }
 
 func (s *store) Set(key string, value interface{}) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	var tmp common.MapStr
 	if err := typeconv.Convert(&tmp, value); err != nil {
 		return err
 	}
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	s.mem.Set(key, tmp)
 	return s.logOperation(&opSet{K: key, V: tmp})
@@ -126,19 +126,19 @@ func (s *store) Remove(key string) error {
 }
 
 func (s *store) logOperation(op op) error {
-	err := s.disk.LogOperation(op)
 	if s.disk.mustCheckpoint() {
-		checkpointErr := s.disk.WriteCheckpoint(s.mem.table)
+		err := s.disk.WriteCheckpoint(s.mem.table)
 		if err != nil {
-			// report the checkpoint error if we don't have an up to date log file.
-			// otherwise ignore the error, as the on disk state is known to be correct and
-			// we can continue with a valid state after restart anyways.
-			// The file will continue to be in 'invalid' state and the store tries to
-			// checkpoint again on the next update.
-			err = checkpointErr
+			// if writing the new checkpoint file failed we try to fallback to
+			// appending the log operation.
+			// TODO: make append configurable and retry checkpointing with backoff.
+			s.disk.LogOperation(op)
 		}
+
+		return err
 	}
-	return err
+
+	return s.disk.LogOperation(op)
 }
 
 func (s *store) Each(fn func(string, backend.ValueDecoder) (bool, error)) error {
