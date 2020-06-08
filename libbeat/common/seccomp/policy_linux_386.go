@@ -115,6 +115,7 @@ func init() {
 					"stat",
 					"stat64",
 					"statfs64",
+					"symlinkat",
 					"sysinfo",
 					"tgkill",
 					"time",

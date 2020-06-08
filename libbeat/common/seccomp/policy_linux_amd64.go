@@ -127,6 +127,7 @@ func init() {
 					"splice",
 					"stat",
 					"statfs",
+					"symlinkat",
 					"sysinfo",
 					"tgkill",
 					"time",
