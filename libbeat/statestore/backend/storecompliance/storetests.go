@@ -1,4 +1,4 @@
-package storetests
+package storecompliance
 
 import (
 	"flag"
