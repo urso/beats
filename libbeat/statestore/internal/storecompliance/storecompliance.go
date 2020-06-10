@@ -1,3 +1,7 @@
+// Package storecompliance provides a common test suite that a store
+// implementation must succeed in order to be compliant to the beats
+// statestore. The Internal tests are used by statestore/storetest and
+// statestore/backend/memlog.
 package storecompliance
 
 import (

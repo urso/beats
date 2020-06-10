@@ -1,4 +1,4 @@
-// Package storetest provides helpers for testing with fake statestores.
+// Package storetest provides helpers for testing functionality that requires a statestore.
 package storetest
 
 import (
