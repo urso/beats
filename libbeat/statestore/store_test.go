@@ -142,8 +142,8 @@ func TestStore_Each(t *testing.T) {
 	})
 	t.Run("correctly iterate pairs", func(t *testing.T) {
 		data := map[string]interface{}{
-			"a": int64(1),
-			"b": "test",
+			"a": map[string]interface{}{"field": "hello"},
+			"b": map[string]interface{}{"field": "test"},
 		}
 		store := makeTestStore(t, data)
 		defer store.Close()

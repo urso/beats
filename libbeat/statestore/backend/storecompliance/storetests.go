@@ -1,6 +1,7 @@
 package storecompliance
 
 import (
+	"errors"
 	"flag"
 	"testing"
 
@@ -87,4 +88,59 @@ func testRemove(t *testing.T, factory BackendFactory) {
 }
 
 func testIteration(t *testing.T, factory BackendFactory) {
+	data := map[string]interface{}{
+		"a": map[string]interface{}{"field": "hello"},
+		"b": map[string]interface{}{"field": "world"},
+	}
+
+	addTestData := func(store *Store, reopen bool, data map[string]interface{}) {
+		for k, v := range data {
+			store.MustSet(k, v)
+		}
+		store.ReopenIf(reopen)
+	}
+
+	runWithBools(t, "reopen", func(t *testing.T, reopen bool) {
+		t.Run("all keys", WithStore(factory, func(t *testing.T, store *Store) {
+			addTestData(store, reopen, data)
+
+			got := map[string]interface{}{}
+			err := store.Each(func(key string, dec backend.ValueDecoder) (bool, error) {
+				var tmp interface{}
+				if err := dec.Decode(&tmp); err != nil {
+					return false, err
+				}
+
+				got[key] = tmp
+				return true, nil
+			})
+
+			assert.NoError(t, err)
+			assert.Equal(t, data, got)
+		}))
+
+		t.Run("stop on error", WithStore(factory, func(t *testing.T, store *Store) {
+			addTestData(store, reopen, data)
+
+			count := 0
+			err := store.Each(func(_ string, _ backend.ValueDecoder) (bool, error) {
+				count++
+				return true, errors.New("oops")
+			})
+			assert.Equal(t, 1, count)
+			assert.Error(t, err)
+		}))
+
+		t.Run("stop on bool", WithStore(factory, func(t *testing.T, store *Store) {
+			addTestData(store, reopen, data)
+
+			count := 0
+			err := store.Each(func(_ string, _ backend.ValueDecoder) (bool, error) {
+				count++
+				return false, nil
+			})
+			assert.Equal(t, 1, count)
+			assert.NoError(t, err)
+		}))
+	})
 }

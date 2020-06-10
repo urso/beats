@@ -184,7 +184,7 @@ func (s *MapStore) Each(fn func(string, backend.ValueDecoder) (bool, error)) err
 
 	s.init()
 	for k, v := range s.Table {
-		cont, err := fn(k, valueUnpacker{v})
+		cont, err := fn(k, CreateValueDecoder(v))
 		if !cont || err != nil {
 			return err
 		}
