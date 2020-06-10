@@ -84,7 +84,10 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, chec
 }
 
 func (s *store) Close() error {
-	return nil
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.mem = memstore{}
+	return s.disk.Close()
 }
 
 func (s *store) Has(key string) (bool, error) {

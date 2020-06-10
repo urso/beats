@@ -19,7 +19,7 @@ type (
 
 // operation type names
 const (
-	opValSet    = "Set"
+	opValSet    = "set"
 	opValRemove = "remove"
 )
 

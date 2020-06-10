@@ -453,14 +453,21 @@ func readDataFile(path string, fn func(string, common.MapStr)) error {
 	}
 	defer f.Close()
 
-	var states []storeEntry
+	var states []map[string]interface{}
 	dec := json.NewDecoder(f)
 	if err := dec.Decode(&states); err != nil {
 		return fmt.Errorf("corrupted data file: %v", err)
 	}
 
 	for _, state := range states {
-		fn(state.Key, state.Fields)
+		keyRaw := state["_key"]
+		key, ok := keyRaw.(string)
+		if !ok {
+			continue
+		}
+
+		delete(state, "_key")
+		fn(key, common.MapStr(state))
 	}
 
 	return nil
@@ -480,6 +487,11 @@ func loadLogFile(
 	home string,
 ) (logTxid uint64, entries uint, err error) {
 	err = readLogFile(home, func(rawOp op, id uint64) error {
+		// ignore old entries in case the log file truncation was not executed between a beat restart.
+		if isTxIDLessEqual(id, txid) {
+			return nil
+		}
+
 		if id != txid+1 {
 			return errTxIDInvalid
 		}
@@ -595,4 +607,8 @@ func readMetaFile(home string) (storeMeta, error) {
 	}
 
 	return meta, nil
+}
+
+func isTxIDLessEqual(a, b uint64) bool {
+	return int64(a-b) <= 0
 }
