@@ -218,7 +218,7 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	if err := os.Rename(tmpPath, checkpointPath); err != nil {
 		return err
 	}
-	s.syncHome()
+	trySyncPath(s.home)
 
 	// clear transaction log once finished
 	s.checkpointClearLog()
@@ -235,7 +235,7 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	s.updateActiveSymLink()
 	s.removeOldDataFiles()
 
-	s.syncHome()
+	trySyncPath(s.home)
 	return nil
 }
 
@@ -297,10 +297,6 @@ func (s *diskstore) checkpointTmpFile(baseName string, states map[string]entry) 
 	return tempfile, nil
 }
 
-func (s *diskstore) syncHome() {
-	trySyncPath(s.home)
-}
-
 func (s *diskstore) checkpointClearLog() {
 	if s.logFile == nil {
 		s.logNeedsTruncate = true
@@ -325,36 +321,8 @@ func (s *diskstore) checkpointClearLog() {
 }
 
 func (s *diskstore) updateActiveSymLink() error {
-	activeLink := filepath.Join(s.home, "active.json")
-	tmpLink := filepath.Join(s.home, "active.json.tmp")
 	active, _ := activeDataFile(s.dataFiles)
-	log := s.log.With("temporary", tmpLink, "data_file", active, "link_file", activeLink)
-
-	if active == "" {
-		if err := os.Remove(activeLink); err != nil { // try, remove active symlink if present.
-			log.Errorf("Failed to remove old symlink pointing to non existant file: %v", err)
-		}
-		return nil
-	}
-
-	// Atomically try to update the symlink to the most recent data file.
-	// We 'simulate' the atomic update by create the temporary active.json.tmp symlink file,
-	// which we rename to active.json. If active.json.tmp exists we remove it.
-	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
-		log.Errorf("Failed to remove old temporary symlink file: %v", err)
-		return err
-	}
-	if err := os.Symlink(active, tmpLink); err != nil {
-		log.Errorf("Failed to create temporary symlink: %v", err)
-		return err
-	}
-	if err := os.Rename(tmpLink, activeLink); err != nil {
-		log.Errorf("Failed to replace link file: %v", err)
-		return err
-	}
-
-	s.syncHome()
-	return nil
+	return updateActiveMarker(s.log, s.home, active)
 }
 
 func (s *diskstore) removeOldDataFiles() {

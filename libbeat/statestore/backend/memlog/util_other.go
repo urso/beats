@@ -1,3 +1,5 @@
+// +build linux dragonfly freebsd netbsd openbsd solaris
+
 package memlog
 
 import (

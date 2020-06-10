@@ -2,8 +2,12 @@ package memlog
 
 import (
 	"io"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"syscall"
+
+	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
 type ensureWriter struct {
@@ -47,4 +51,36 @@ func trySyncPath(path string) {
 	}
 	defer f.Close()
 	syncFile(f)
+}
+
+func updateActiveMarker(log *logp.Logger, home, active string) error {
+	activeLink := filepath.Join(home, "active.dat")
+	tmpLink := filepath.Join(home, "active.dat")
+	log = log.With("temporary", tmpLink, "data_file", active, "link_file", activeLink)
+
+	if active == "" {
+		if err := os.Remove(activeLink); err != nil { // try, remove active symlink if present.
+			log.Errorf("Failed to remove old pointer file: %v", err)
+		}
+		return nil
+	}
+
+	// Atomically try to update the pointer file to the most recent data file.
+	// We 'simulate' the atomic update by create the temporary active.json.tmp symlink file,
+	// which we rename to active.json. If active.json.tmp exists we remove it.
+	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
+		log.Errorf("Failed to remove old temporary symlink file: %v", err)
+		return err
+	}
+	if err := ioutil.WriteFile(tmpLink, []byte(active), 0600); err != nil {
+		log.Errorf("Failed to write temporary pointer file: %v", err)
+		return err
+	}
+	if err := os.Rename(tmpLink, activeLink); err != nil {
+		log.Errorf("Failed to replace link file: %v", err)
+		return err
+	}
+
+	trySyncPath(home)
+	return nil
 }
