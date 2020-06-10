@@ -5,7 +5,7 @@ import (
 
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore/backend"
-	"github.com/elastic/beats/v7/libbeat/statestore/backend/storetests"
+	"github.com/elastic/beats/v7/libbeat/statestore/backend/storecompliance"
 )
 
 func init() {
@@ -13,7 +13,7 @@ func init() {
 }
 
 func TestCompliance(t *testing.T) {
-	storetests.TestBackendCompliance(t, func(testPath string) (backend.Registry, error) {
+	storecompliance.TestBackendCompliance(t, func(testPath string) (backend.Registry, error) {
 		return NewMemoryStoreBackend(), nil
 	})
 }
