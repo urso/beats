@@ -72,6 +72,8 @@ func (s *Store) Close() error {
 	return s.shared.Release()
 }
 
+// Has checks if the given key exists.
+// Has returns an error if the store has already been closed or the storage backend returns an error.
 func (s *Store) Has(key string) (bool, error) {
 	const operation = "store/has"
 	if err := s.active.Add(1); err != nil {
@@ -86,6 +88,9 @@ func (s *Store) Has(key string) (bool, error) {
 	return has, nil
 }
 
+// Get unpacks the value for a given key into "into".
+// Get returns an error if the store has already been closed, the key does not
+// exist, or the storage backend returns an error.
 func (s *Store) Get(key string, into interface{}) error {
 	const operation = "store/get"
 	if err := s.active.Add(1); err != nil {
@@ -100,6 +105,9 @@ func (s *Store) Get(key string, into interface{}) error {
 	return nil
 }
 
+// Set inserts or overwrite a key value pair.
+// Set returns an error if the store has been closed, the value can not be
+// encoded by the store, or the storage backend did failed.
 func (s *Store) Set(key string, from interface{}) error {
 	const operation = "store/get"
 	if err := s.active.Add(1); err != nil {
@@ -113,21 +121,10 @@ func (s *Store) Set(key string, from interface{}) error {
 	return nil
 }
 
-/*
-func (s *Store) Update(key string, value interface{}) error {
-	const operation = "store/update"
-	if err := s.activeTx.Add(1); err != nil {
-		return &ErrorClosed{operation: operation, name: s.shared.name}
-	}
-	defer s.activeTx.Done()
-
-	if err := s.shared.backend.Update((key), value); err != nil {
-		return &ErrorOperation{name: s.shared.name, operation: operation, cause: err}
-	}
-	return nil
-}
-*/
-
+// Remove removes a key value pair from the store. Remove does not error if the
+// key is unknown to the store.
+// An error is returned if the store has already been closed or the operation
+// itself fails in the storage backend.
 func (s *Store) Remove(key string) error {
 	const operation = "store/remove"
 	if err := s.active.Add(1); err != nil {
@@ -141,6 +138,9 @@ func (s *Store) Remove(key string) error {
 	return nil
 }
 
+// Each iterates over all key-value pairs in the store.
+// The iteration stops if fn returns false or an error value != nil.
+// If the store has been closed already an error is returned.
 func (s *Store) Each(fn func(string, ValueDecoder) (bool, error)) error {
 	if err := s.active.Add(1); err != nil {
 		return &ErrorClosed{operation: "store/each", name: s.shared.name}

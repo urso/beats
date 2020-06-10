@@ -22,12 +22,6 @@ import (
 	"fmt"
 )
 
-var (
-	errTxUnknownKey = errors.New("unknown key")
-	errTxClosed     = errors.New("transaction is already closed")
-	errTxReadonly   = errors.New("no store updates allowed in readonly transaction")
-)
-
 // ErrorAccess indicates that an error occured when trying to open a Store.
 type ErrorAccess struct {
 	name  string

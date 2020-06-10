@@ -34,14 +34,18 @@ type ValueDecoder interface {
 	Decode(to interface{}) error
 }
 
+// Store provides access to key value pairs.
 type Store interface {
 	// Close should close the store and release all used resources.
 	Close() error
 
 	Has(key string) (bool, error)
+
 	Get(key string, into interface{}) error
+
 	Set(key string, from interface{}) error
-	// Update(key string, value interface{}) error
+
 	Remove(string) error
+
 	Each(fn func(string, ValueDecoder) (bool, error)) error
 }
