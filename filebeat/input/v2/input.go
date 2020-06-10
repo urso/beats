@@ -72,7 +72,7 @@ type Context struct {
 	ID          string
 	Agent       beat.Info
 	Logger      *logp.Logger
-	Metadata    *common.MapStrPointer // XXX: from Autodiscovery.
+	Metadata    *common.MapStrPointer // XXX: from Autodiscovery. To be removed in the future.
 	Cancelation Canceler
 }
 
@@ -88,23 +88,4 @@ type TestContext struct {
 type Canceler interface {
 	Done() <-chan struct{}
 	Err() error
-}
-
-type simpleInputManager struct {
-	configure func(*common.Config) (Input, error)
-}
-
-// Init is required to fullfil the input.InputManager interface.
-// For the kafka input no special initialization is required.
-func (*simpleInputManager) Init(grp unison.Group, m Mode) error { return nil }
-
-// Creates builds a new Input instance from the given configuation, or returns
-// an error if the configuation is invalid.
-func (manager *simpleInputManager) Create(cfg *common.Config) (Input, error) {
-	return manager.configure(cfg)
-}
-
-// ConfigureWith creates an InputManager that creates new inputs with the given function.
-func ConfigureWith(fn func(*common.Config) (Input, error)) InputManager {
-	return &simpleInputManager{configure: fn}
 }

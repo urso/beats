@@ -38,7 +38,12 @@ type InputManager struct {
 type Input interface {
 	Name() string
 	Test(v2.TestContext) error
-	Run(ctx v2.Context, publish func(beat.Event)) error
+	Run(ctx v2.Context, publish Publisher) error
+}
+
+// Publisher is used by the Input to emit events.
+type Publisher interface {
+	Publish(beat.Event)
 }
 
 type configuredInput struct {
@@ -78,7 +83,7 @@ func (si configuredInput) Run(ctx v2.Context, pipeline beat.PipelineConnector) (
 		// configure pipeline to disconnect input on stop signal.
 		CloseRef: ctx.Cancelation,
 		Processing: beat.ProcessingConfig{
-			// Note: still required for autodiscovery. These kind of processing setups
+			// XXX: still required for autodiscovery. These kind of processing setups
 			// should move to autodiscovery in the future, but is required to be applied
 			// here for now to keep compatibility with other beats.
 			DynamicFields: ctx.Metadata,
@@ -89,7 +94,7 @@ func (si configuredInput) Run(ctx v2.Context, pipeline beat.PipelineConnector) (
 	}
 
 	defer client.Close()
-	return si.input.Run(ctx, client.Publish)
+	return si.input.Run(ctx, client)
 }
 
 func (si configuredInput) Test(ctx v2.TestContext) error {
