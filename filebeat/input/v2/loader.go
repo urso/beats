@@ -22,17 +22,20 @@ import (
 	"fmt"
 
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/feature"
+	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
 )
 
 type Loader struct {
+	log         *logp.Logger
 	registry    map[string]Plugin
 	typeField   string
 	defaultType string
 }
 
-func NewLoader(plugins []Plugin, typeField, defaultType string) (*Loader, error) {
+func NewLoader(log *logp.Logger, plugins []Plugin, typeField, defaultType string) (*Loader, error) {
 	if typeField == "" {
 		typeField = "type"
 	}
@@ -47,6 +50,7 @@ func NewLoader(plugins []Plugin, typeField, defaultType string) (*Loader, error)
 	}
 
 	return &Loader{
+		log:         log,
 		registry:    registry,
 		typeField:   typeField,
 		defaultType: defaultType,
@@ -79,7 +83,18 @@ func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 		return nil, &LoaderError{Name: name, Reason: ErrUnknown}
 	}
 
-	return p.Configure(cfg)
+	log := l.log.With("input", name, "stability", p.Stability, "deprecated", p.Deprecated)
+	switch p.Stability {
+	case feature.Experimental:
+		log.Warnf("EXPERIMENTAL: The %v input is experimental", name)
+	case feature.Beta:
+		log.Warnf("BETA: The %v input is beta", name)
+	}
+	if p.Deprecated {
+		log.Warnf("DEPRECATED: The %v input is deprecated", name)
+	}
+
+	return p.Manager.Create(cfg)
 }
 
 func required(b bool, msg string) {
@@ -94,9 +109,16 @@ func validatePlugins(plugins []Plugin) error {
 	seen := common.StringSet{}
 	dups := map[string]int{}
 
-	// look for duplicate names.
+	var errs []error
 	for _, p := range plugins {
 		name := p.Details().Name
+
+		// check if 'Stability' is configured correctly
+		if p.Stability != feature.Undefined {
+			errs = append(errs, fmt.Errorf("plugin '%v' has stability not set", name))
+		}
+
+		// look for duplicate names.
 		if seen.Has(name) {
 			dups[name]++
 		}
@@ -107,7 +129,6 @@ func validatePlugins(plugins []Plugin) error {
 		return nil
 	}
 
-	var errs []error
 	for name, count := range dups {
 		errs = append(errs, fmt.Errorf("plugin '%v' found %v time(s)", name, count))
 	}

@@ -286,7 +286,7 @@ func (fb *Filebeat) Run(b *beat.Beat) error {
 
 	inputsLogger := logp.NewLogger("input")
 	v2Inputs := fb.pluginFactory(b.Info, inputsLogger, stateStore)
-	v2InputLoader, err := v2.NewLoader(v2Inputs, "type", "")
+	v2InputLoader, err := v2.NewLoader(inputsLogger, v2Inputs, "type", "")
 	if err != nil {
 		panic(err) // loader detected invalid state.
 	}

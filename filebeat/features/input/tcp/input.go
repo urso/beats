@@ -43,27 +43,25 @@ type server struct {
 }
 
 func Plugin() input.Plugin {
-	return plugin
+	return input.Plugin{
+		Name:       "tcp",
+		Stability:  feature.Stable,
+		Deprecated: false,
+		Info:       "TCP server",
+		Doc:        "The tcp input creates a TCP server and reads line delimited events",
+		Manager:    stateless.InputManager{Configure: configure},
+	}
 }
 
-var plugin = input.Plugin{
-	Name:       "tcp",
-	Stability:  feature.Stable,
-	Deprecated: false,
-	Info:       "TCP server",
-	Doc:        "The tcp input creates a TCP server and reads line delimited events",
-	Manager: stateless.InputManager{
-		Configure: func(cfg *common.Config) (stateless.Input, error) {
-			config := defaultConfig()
-			if err := cfg.Unpack(&config); err != nil {
-				return nil, err
-			}
-			return configure(config)
-		},
-	},
+func configure(cfg *common.Config) (stateless.Input, error) {
+	config := defaultConfig()
+	if err := cfg.Unpack(&config); err != nil {
+		return nil, err
+	}
+	return newServer(config)
 }
 
-func configure(config config) (*server, error) {
+func newServer(config config) (*server, error) {
 	splitFunc := netcommon.SplitFunc([]byte(config.LineDelimiter))
 	if splitFunc == nil {
 		return nil, fmt.Errorf("unable to create splitFunc for delimiter %s", config.LineDelimiter)
@@ -96,11 +94,11 @@ func (s *server) Test(ctx input.TestContext) error {
 // Run starts the TCP server waiting for clients to connect.  Run returns on
 // failure to create the listener, or after receiving a shutdown signal from
 // the execution context.
-func (s *server) Run(ctx input.Context, publish func(beat.Event)) error {
+func (s *server) Run(ctx input.Context, publisher stateless.Publisher) error {
 	// initialize server and event publishing
 	cb := func(data []byte, metadata inputsource.NetworkMetadata) {
 		event := createEvent(data, metadata)
-		publish(event)
+		publisher.Publish(event)
 	}
 	factory := netcommon.SplitHandlerFactory(netcommon.FamilyTCP, ctx.Logger, tcp.MetadataCallback, cb, s.splitFunc)
 	server, err := tcp.New(&s.config.Config, factory)

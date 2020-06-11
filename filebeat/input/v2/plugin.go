@@ -18,19 +18,38 @@
 package v2
 
 import (
-	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/feature"
 )
 
+// Plugin describes a new input type. Input types should provide a constructor
+// function that requires dependencies to be passed and fills out the Plugin structure.
+// The Manager is used to finally create and manage inputs multiple inputs of the same type.
+// The input-stateless and input-cursor packages, as well as the ConfigureWith function provide
+// sample input managers.
 type Plugin struct {
-	Name       string
-	Stability  feature.Stability
+	// Name of the input type.
+	Name string
+
+	// Configure the input stability. If the stability is not 'Stable' a message
+	// is logged when the input type is configured.
+	Stability feature.Stability
+
+	// Deprecated marks the plugin as deprecated. If set a deprecation message is logged if
+	// an input is configured.
 	Deprecated bool
-	Info       string
-	Doc        string
-	Manager    InputManager
+
+	// Info contains a short description of the input type.
+	Info string
+
+	// Doc contains an optional longer description.
+	Doc string
+
+	// Manager MUST be configured. The manager is used to create the inputs.
+	Manager InputManager
 }
 
+// Details returns a generic feature description that is compatible with the
+// feature package.
 func (p Plugin) Details() feature.Details {
 	return feature.Details{
 		Name:       p.Name,
@@ -39,8 +58,4 @@ func (p Plugin) Details() feature.Details {
 		Info:       p.Info,
 		Doc:        p.Doc,
 	}
-}
-
-func (p Plugin) Configure(cfg *common.Config) (Input, error) {
-	return p.Manager.Create(cfg)
 }
