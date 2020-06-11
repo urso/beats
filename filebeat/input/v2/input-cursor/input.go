@@ -113,10 +113,7 @@ func (inp *managedInput) runSource(
 
 	// connect to libbeat publisher pipeline
 	client, err := pipeline.ConnectWith(beat.ClientConfig{
-		CloseRef: ctx.Cancelation,
-		Processing: beat.ProcessingConfig{
-			DynamicFields: ctx.Metadata,
-		},
+		CloseRef:   ctx.Cancelation,
 		ACKHandler: newInputACKHandler(ctx.Logger),
 	})
 	if err != nil {

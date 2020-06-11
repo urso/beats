@@ -23,9 +23,22 @@ import (
 
 // Plugin describes a new input type. Input types should provide a constructor
 // function that requires dependencies to be passed and fills out the Plugin structure.
-// The Manager is used to finally create and manage inputs multiple inputs of the same type.
+// The Manager is used to finally create and manage inputs of the same type.
 // The input-stateless and input-cursor packages, as well as the ConfigureWith function provide
 // sample input managers.
+//
+// Example:
+//
+//   func Plugin() input.Plugin {
+//       return input.Plugin{
+//           Name: "myservice",
+//           Stability: feature.Stable,
+//           Deprecated: false,
+//           Info: "collect data from myservice",
+//           Manager: stateless.NewInputManager(configure),
+//       }
+//   }
+//
 type Plugin struct {
 	// Name of the input type.
 	Name string

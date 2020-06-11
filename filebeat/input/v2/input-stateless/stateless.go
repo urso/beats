@@ -52,6 +52,10 @@ type configuredInput struct {
 
 var _ v2.InputManager = InputManager{}
 
+func NewInputManager(configure func(*common.Config) (Input, error)) InputManager {
+	return InputManager{Configure: configure}
+}
+
 func (m InputManager) Init(_ unison.Group, _ v2.Mode) error { return nil }
 
 // Create configures a transient input and ensures that the final input can be used with
@@ -82,12 +86,6 @@ func (si configuredInput) Run(ctx v2.Context, pipeline beat.PipelineConnector) (
 
 		// configure pipeline to disconnect input on stop signal.
 		CloseRef: ctx.Cancelation,
-		Processing: beat.ProcessingConfig{
-			// XXX: still required for autodiscovery. These kind of processing setups
-			// should move to autodiscovery in the future, but is required to be applied
-			// here for now to keep compatibility with other beats.
-			DynamicFields: ctx.Metadata,
-		},
 	})
 	if err != nil {
 		return err

@@ -49,7 +49,7 @@ func Plugin() input.Plugin {
 		Deprecated: false,
 		Info:       "TCP server",
 		Doc:        "The tcp input creates a TCP server and reads line delimited events",
-		Manager:    stateless.InputManager{Configure: configure},
+		Manager:    stateless.NewInputManager(configure),
 	}
 }
 

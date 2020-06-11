@@ -27,14 +27,21 @@ import (
 
 // InputManager creates and maintains actions and background processes for an
 // input type.
+// The InputManager is used to create inputs. The InputManager can provide
+// additional functionality like coordination between input types, custom
+// functionality for querying or caching shared information, application of
+// common settings not unique to a particular input type, or require a more
+// specific Input interface to be implemented by the actual input.
 type InputManager interface {
 	// Init signals to InputManager to initialize internal resources.
-	Init(grp unison.Group, m Mode) error
+	// The tells the input manager if the Beat is actually running the inputs or
+	// if inputs are only configured for testing/validation purposes.
+	Init(grp unison.Group, mode Mode) error
 
 	// Creates builds a new Input instance from the given configuation, or returns
 	// an error if the configuation is invalid.
-	// The generated must not collect any data yet. The Beat will use the Test/Run
-	// methods of the input.
+	// The input must establish any connection for data collection yet. The Beat
+	// will use the Test/Run methods of the input.
 	Create(*common.Config) (Input, error)
 }
 
@@ -49,30 +56,48 @@ const (
 )
 
 // Input is a configured input object that can be used to probe or start
-// the actual data processing.
+// the actual data collection.
 type Input interface {
-	// TODO: check if/how we can remove this method. Currently it is required for
+	// Name reports the input name.
+	//
+	// XXX: check if/how we can remove this method. Currently it is required for
 	// compatibility reasons with existing interfaces in libbeat, autodiscovery
 	// and filebeat.
 	Name() string
 
-	// Test checks the configuaration and runs addition checks if the Input can be
-	// initialized from the configuration (e.g. check if host/port or files are
+	// Test checks the configuaration and runs additional checks if the Input can
+	// actually collect data for the given configuration (e.g. check if host/port or files are
 	// accessible).
 	Test(TestContext) error
 
-	// Run executes the data collection loop. Run must return an error only if the
-	// error can not be recovered.
+	// Run starts the data collection. Run must return an error only if the
+	// error is fatal making it impossible for the input to recover.
 	Run(Context, beat.PipelineConnector) error
 }
 
 // Context provides the Input Run function with common environmental
 // information and services.
 type Context struct {
-	ID          string
-	Agent       beat.Info
-	Logger      *logp.Logger
-	Metadata    *common.MapStrPointer // XXX: from Autodiscovery. To be removed in the future.
+	// Logger provides a structured logger to inputs. The logger is assumed to be initialized
+	// with labels that will identify logs for a given input.
+	Logger *logp.Logger
+
+	// The input ID.
+	ID string
+
+	// Agent procides additional Beat info like instance ID or beat name.
+	Agent beat.Info
+
+	// Metadata contain special metadata that need to be added to events.
+	//
+	// XXX: from Autodiscovery. To be removed in the future.
+	//
+	// Note: input managers provided by the cursor or stateless package (as well
+	// as the InputManager created by ConfigureWith) will correctly setup the
+	// publisher.  Custom input managers need to configure the beat.Client when
+	// connecting to the publisher pipeline.
+	Metadata *common.MapStrPointer
+
 	Cancelation Canceler
 }
 

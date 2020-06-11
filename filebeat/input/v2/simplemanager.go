@@ -26,8 +26,9 @@ type simpleInputManager struct {
 	configure func(*common.Config) (Input, error)
 }
 
-// ConfigureWith creates an InputManager that provides no extra logic. The
-// function fn will be called for every input to be configured.
+// ConfigureWith creates an InputManager that provides no extra logic and
+// allows each input to fully control event collection and publishing in
+// isolation. The function fn will be called for every input to be configured.
 func ConfigureWith(fn func(*common.Config) (Input, error)) InputManager {
 	return &simpleInputManager{configure: fn}
 }
