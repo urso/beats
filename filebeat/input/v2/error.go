@@ -21,15 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/urso/diag"
 )
 
-// LoaderError is returned by Loaders in case of failures.
-type LoaderError struct {
-	// Additional metadata for structure logging (if applicable)
-	Diagnostics *diag.Context
-
+// LoadError is returned by Loaders in case of failures.
+type LoadError struct {
 	// Name of input/module that failed to load (if applicable)
 	Name string
 
@@ -41,6 +36,12 @@ type LoaderError struct {
 	Message string
 }
 
+// SetupError indicates that the loader initialization has detected
+// errors in individual plugin configurations or duplicates.
+type SetupError struct {
+	Fails []error
+}
+
 // ErrUnknown indicates that the plugin type does not exist. Either
 // because the 'type' setting name does not match the loaders expectations,
 // or because the type is unknown.
@@ -48,11 +49,6 @@ var ErrUnknown = errors.New("unknown input type")
 
 // ErrNoInputConfigured indicates that the 'type' setting is missing.
 var ErrNoInputConfigured = errors.New("no input type configured")
-
-// ErrInfiniteLoadLoop is reported by loaders supporting recursive input
-// configurations (inputs referencing other inputs). The error indicates
-// that the loader has detected a loop that most not be.
-var ErrInfiniteLoadLoop = errors.New("infinite load loop detected")
 
 // ErrPluginWithoutName reports that the operation failed because
 // the plugin is required to have a Name.
@@ -64,21 +60,18 @@ func IsUnknownInputError(err error) bool { return errors.Is(err, ErrUnknown) }
 
 func failedInputName(err error) string {
 	switch e := err.(type) {
-	case *LoaderError:
+	case *LoadError:
 		return e.Name
 	default:
 		return ""
 	}
 }
 
-// Context returns the errors diagnostics if present
-func (e *LoaderError) Context() *diag.Context { return e.Diagnostics }
-
 // Unwrap returns the reason if present
-func (e *LoaderError) Unwrap() error { return e.Reason }
+func (e *LoadError) Unwrap() error { return e.Reason }
 
 // Error returns the errors string repesentation
-func (e *LoaderError) Error() string {
+func (e *LoadError) Error() string {
 	var buf strings.Builder
 
 	if e.Message != "" {
@@ -97,6 +90,16 @@ func (e *LoaderError) Error() string {
 
 	if buf.Len() == 0 {
 		return "<loader error>"
+	}
+	return buf.String()
+}
+
+// Error returns the errors string repesentation
+func (e *SetupError) Error() string {
+	var buf strings.Builder
+	buf.WriteString("invalid plugin setup found:")
+	for _, err := range e.Fails {
+		fmt.Fprintf(&buf, "\n\t%v", err)
 	}
 	return buf.String()
 }

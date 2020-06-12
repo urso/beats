@@ -28,13 +28,13 @@ import (
 // InputManager creates and maintains actions and background processes for an
 // input type.
 // The InputManager is used to create inputs. The InputManager can provide
-// additional functionality like coordination between input types, custom
-// functionality for querying or caching shared information, application of
-// common settings not unique to a particular input type, or require a more
+// additional functionality like coordination between input of the same type,
+// custom functionality for querying or caching shared information, application
+// of common settings not unique to a particular input type, or require a more
 // specific Input interface to be implemented by the actual input.
 type InputManager interface {
 	// Init signals to InputManager to initialize internal resources.
-	// The tells the input manager if the Beat is actually running the inputs or
+	// The mode tells the input manager if the Beat is actually running the inputs or
 	// if inputs are only configured for testing/validation purposes.
 	Init(grp unison.Group, mode Mode) error
 
@@ -55,7 +55,7 @@ const (
 	ModeOther
 )
 
-// Input is a configured input object that can be used to probe or start
+// Input is a configured input object that can be used to test or start
 // the actual data collection.
 type Input interface {
 	// Name reports the input name.
@@ -78,8 +78,8 @@ type Input interface {
 // Context provides the Input Run function with common environmental
 // information and services.
 type Context struct {
-	// Logger provides a structured logger to inputs. The logger is assumed to be initialized
-	// with labels that will identify logs for a given input.
+	// Logger provides a structured logger to inputs. The logger is initialized
+	// with labels that will identify logs for the input.
 	Logger *logp.Logger
 
 	// The input ID.
@@ -88,24 +88,21 @@ type Context struct {
 	// Agent procides additional Beat info like instance ID or beat name.
 	Agent beat.Info
 
-	// Metadata contain special metadata that need to be added to events.
-	//
-	// XXX: from Autodiscovery. To be removed in the future.
-	//
-	// Note: input managers provided by the cursor or stateless package (as well
-	// as the InputManager created by ConfigureWith) will correctly setup the
-	// publisher.  Custom input managers need to configure the beat.Client when
-	// connecting to the publisher pipeline.
-	Metadata *common.MapStrPointer
-
+	// Cancelation is used by Beats to signal the input to shutdown.
 	Cancelation Canceler
 }
 
 // TestContext provides the Input Test function with common environmental
 // information and services.
 type TestContext struct {
-	Agent       beat.Info
-	Logger      *logp.Logger
+	// Logger provides a structured logger to inputs. The logger is initialized
+	// with labels that will identify logs for the input.
+	Logger *logp.Logger
+
+	// Agent procides additional Beat info like instance ID or beat name.
+	Agent beat.Info
+
+	// Cancelation is used by Beats to signal the input to shutdown.
 	Cancelation Canceler
 }
 

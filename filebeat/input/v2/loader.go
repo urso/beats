@@ -18,16 +18,17 @@
 package v2
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/go-concert/unison"
-	"github.com/urso/sderr"
 )
 
+// Loader can be used to create Inputs from configurations.
+// The loader is initialized with a list of plugins, and finds the correct plugin
+// when a configuration is passed to Configure.
 type Loader struct {
 	log         *logp.Logger
 	registry    map[string]Plugin
@@ -35,13 +36,17 @@ type Loader struct {
 	defaultType string
 }
 
+// NewLoader creates a new Loader for configuring inputs from a slice if plugins.
+// NewLoader returns a SetupError if invalid plugin configurations or duplicates in the slice are detected.
+// The Loader will read the plugin name from the configuration object as is
+// configured by typeField. If typeField is empty, it defaults to "type".
 func NewLoader(log *logp.Logger, plugins []Plugin, typeField, defaultType string) (*Loader, error) {
 	if typeField == "" {
 		typeField = "type"
 	}
 
-	if err := validatePlugins(plugins); err != nil {
-		return nil, err
+	if errs := validatePlugins(plugins); len(errs) > 0 {
+		return nil, &SetupError{errs}
 	}
 
 	registry := make(map[string]Plugin, len(plugins))
@@ -57,6 +62,7 @@ func NewLoader(log *logp.Logger, plugins []Plugin, typeField, defaultType string
 	}, nil
 }
 
+// Init runs Init on all InputManagers for all plugins known to the loader.
 func (l *Loader) Init(group unison.Group, mode Mode) error {
 	for _, p := range l.registry {
 		if err := p.Manager.Init(group, mode); err != nil {
@@ -66,11 +72,18 @@ func (l *Loader) Init(group unison.Group, mode Mode) error {
 	return nil
 }
 
+// Configure creates a new input from a Config object.
+// The loader reads the input type name from the cfg object and tries to find a
+// matching plugin. If a plugin is found, the plugin it's InputManager is used to create
+// the input.
+// Returns a LoadError if the input name can not be read from the config or if
+// the type does not exist. Error values for Ccnfiguration errors do depend on
+// the InputManager.
 func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 	name, err := cfg.String(l.typeField, -1)
 	if err != nil {
 		if l.defaultType == "" {
-			return nil, &LoaderError{
+			return nil, &LoadError{
 				Reason:  ErrNoInputConfigured,
 				Message: fmt.Sprintf("%v setting is missing", l.typeField),
 			}
@@ -80,7 +93,7 @@ func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 
 	p, exists := l.registry[name]
 	if !exists {
-		return nil, &LoaderError{Name: name, Reason: ErrUnknown}
+		return nil, &LoadError{Name: name, Reason: ErrUnknown}
 	}
 
 	log := l.log.With("input", name, "stability", p.Stability, "deprecated", p.Deprecated)
@@ -97,44 +110,23 @@ func (l *Loader) Configure(cfg *common.Config) (Input, error) {
 	return p.Manager.Create(cfg)
 }
 
-func required(b bool, msg string) {
-	if !b {
-		panic(errors.New(msg))
-	}
-}
-
-// validatePlugins checks if there are multiple plugins with the same name
-// in the registry.
-func validatePlugins(plugins []Plugin) error {
-	seen := common.StringSet{}
-	dups := map[string]int{}
-
+// validatePlugins checks if there are multiple plugins with the same name in
+// the registry.
+func validatePlugins(plugins []Plugin) []error {
 	var errs []error
+
+	counts := map[string]int{}
 	for _, p := range plugins {
-		name := p.Details().Name
-
-		// check if 'Stability' is configured correctly
-		if p.Stability != feature.Undefined {
-			errs = append(errs, fmt.Errorf("plugin '%v' has stability not set", name))
+		counts[p.Name]++
+		if err := p.validate(); err != nil {
+			errs = append(errs, err)
 		}
+	}
 
-		// look for duplicate names.
-		if seen.Has(name) {
-			dups[name]++
+	for name, count := range counts {
+		if count > 1 {
+			errs = append(errs, fmt.Errorf("plugin '%v' found %v times", name, count))
 		}
-		seen.Add(name)
 	}
-
-	if len(dups) == 0 {
-		return nil
-	}
-
-	for name, count := range dups {
-		errs = append(errs, fmt.Errorf("plugin '%v' found %v time(s)", name, count))
-	}
-	if len(errs) == 1 {
-		return errs[0]
-	}
-
-	return sderr.WrapAll(errs, "registry has multiple duplicate plugins")
+	return errs
 }

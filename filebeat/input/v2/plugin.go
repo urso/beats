@@ -18,16 +18,18 @@
 package v2
 
 import (
+	"fmt"
+
 	"github.com/elastic/beats/v7/libbeat/feature"
 )
 
-// Plugin describes a new input type. Input types should provide a constructor
+// Plugin describes an input type. Input types should provide a constructor
 // function that requires dependencies to be passed and fills out the Plugin structure.
 // The Manager is used to finally create and manage inputs of the same type.
 // The input-stateless and input-cursor packages, as well as the ConfigureWith function provide
 // sample input managers.
 //
-// Example:
+// Example (stateless input):
 //
 //   func Plugin() input.Plugin {
 //       return input.Plugin{
@@ -71,4 +73,20 @@ func (p Plugin) Details() feature.Details {
 		Info:       p.Info,
 		Doc:        p.Doc,
 	}
+}
+
+func (p Plugin) validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("input plugin without name found")
+	}
+	switch p.Stability {
+	case feature.Beta, feature.Experimental, feature.Stable:
+		break
+	default:
+		return fmt.Errorf("plugin '%v' has stability not set", p.Name)
+	}
+	if p.Manager == nil {
+		return fmt.Errorf("invalid plugin (%v) structure detected", p.Name)
+	}
+	return nil
 }
