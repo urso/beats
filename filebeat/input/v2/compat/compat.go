@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Package compat provides helpers for integrating the input/v2 API with
+// existing input based features like autodiscovery, config file reloading, or
+// filebeat modules.
 package compat
 
 import (
@@ -41,11 +44,10 @@ type runner struct {
 	sig       *concert.OnceSignaler
 	input     v2.Input
 	connector beat.PipelineConnector
-	meta      *common.MapStrPointer
 }
 
-// RunnerFactory create a runner factory on top of input Loaders
-// that is compatible with cfgfile runners and autodiscovery.
+// RunnerFactory creates a cfgfile.RunnerFactory from an input Loader that is
+// compatible with cfgfile runners, autodiscovery, and filebeat modules.
 func RunnerFactory(
 	log *logp.Logger,
 	info beat.Info,
@@ -78,7 +80,6 @@ func (f *factory) Create(
 		sig:       concert.NewOnceSignaler(),
 		input:     input,
 		connector: p,
-		meta:      meta,
 	}, nil
 }
 
@@ -96,7 +97,6 @@ func (r *runner) Start() {
 				Agent:       *r.agent,
 				Logger:      log,
 				Cancelation: r.sig,
-				Metadata:    r.meta,
 			},
 			r.connector,
 		)
