@@ -86,80 +86,83 @@ type StateStore interface {
 // New creates a new Filebeat pointer instance.
 func New(plugins PluginFactory) beat.Creator {
 	return func(b *beat.Beat, rawConfig *common.Config) (beat.Beater, error) {
-		config := cfg.DefaultConfig
-		if err := rawConfig.Unpack(&config); err != nil {
-			return nil, fmt.Errorf("Error reading config file: %v", err)
-		}
+		return newBeater(b, plugins, rawConfig)
+	}
+}
 
-		if err := cfgwarn.CheckRemoved6xSettings(
-			rawConfig,
-			"prospectors",
-			"config.prospectors",
-			"registry_file",
-			"registry_file_permissions",
-			"registry_flush",
-		); err != nil {
-			return nil, err
-		}
+func newBeater(b *beat.Beat, plugins PluginFactory, rawConfig *common.Config) (beat.Beater, error) {
+	config := cfg.DefaultConfig
+	if err := rawConfig.Unpack(&config); err != nil {
+		return nil, fmt.Errorf("Error reading config file: %v", err)
+	}
 
-		moduleRegistry, err := fileset.NewModuleRegistry(config.Modules, b.Info, true)
-		if err != nil {
-			return nil, err
-		}
-		if !moduleRegistry.Empty() {
-			logp.Info("Enabled modules/filesets: %s", moduleRegistry.InfoString())
-		}
+	if err := cfgwarn.CheckRemoved6xSettings(
+		rawConfig,
+		"prospectors",
+		"config.prospectors",
+		"registry_file",
+		"registry_file_permissions",
+		"registry_flush",
+	); err != nil {
+		return nil, err
+	}
 
-		moduleInputs, err := moduleRegistry.GetInputConfigs()
-		if err != nil {
-			return nil, err
-		}
+	moduleRegistry, err := fileset.NewModuleRegistry(config.Modules, b.Info, true)
+	if err != nil {
+		return nil, err
+	}
+	if !moduleRegistry.Empty() {
+		logp.Info("Enabled modules/filesets: %s", moduleRegistry.InfoString())
+	}
 
-		if err := config.FetchConfigs(); err != nil {
-			return nil, err
-		}
+	moduleInputs, err := moduleRegistry.GetInputConfigs()
+	if err != nil {
+		return nil, err
+	}
 
-		// Add inputs created by the modules
-		config.Inputs = append(config.Inputs, moduleInputs...)
+	if err := config.FetchConfigs(); err != nil {
+		return nil, err
+	}
 
-		enabledInputs := config.ListEnabledInputs()
-		var haveEnabledInputs bool
-		if len(enabledInputs) > 0 {
-			haveEnabledInputs = true
-		}
+	// Add inputs created by the modules
+	config.Inputs = append(config.Inputs, moduleInputs...)
 
-		if !config.ConfigInput.Enabled() && !config.ConfigModules.Enabled() && !haveEnabledInputs && config.Autodiscover == nil && !b.ConfigManager.Enabled() {
-			if !b.InSetupCmd {
-				return nil, errors.New("no modules or inputs enabled and configuration reloading disabled. What files do you want me to watch?")
-			}
+	enabledInputs := config.ListEnabledInputs()
+	var haveEnabledInputs bool
+	if len(enabledInputs) > 0 {
+		haveEnabledInputs = true
+	}
 
 	if !config.ConfigInput.Enabled() && !config.ConfigModules.Enabled() && !haveEnabledInputs && config.Autodiscover == nil && !b.Manager.Enabled() {
 		if !b.InSetupCmd {
 			return nil, errors.New("no modules or inputs enabled and configuration reloading disabled. What files do you want me to watch?")
 		}
 
-		if *once && config.ConfigInput.Enabled() && config.ConfigModules.Enabled() {
-			return nil, errors.New("input configs and -once cannot be used together")
-		}
-
-		if config.IsInputEnabled("stdin") && len(enabledInputs) > 1 {
-			return nil, fmt.Errorf("stdin requires to be run in exclusive mode, configured inputs: %s", strings.Join(enabledInputs, ", "))
-		}
-
-		fb := &Filebeat{
-			done:           make(chan struct{}),
-			config:         &config,
-			moduleRegistry: moduleRegistry,
-			pluginFactory:  plugins,
-		}
-
-		err = fb.setupPipelineLoaderCallback(b)
-		if err != nil {
-			return nil, err
-		}
-
-		return fb, nil
+		// in the `setup` command, log this only as a warning
+		logp.Warn("Setup called, but no modules enabled.")
 	}
+
+	if *once && config.ConfigInput.Enabled() && config.ConfigModules.Enabled() {
+		return nil, errors.New("input configs and -once cannot be used together")
+	}
+
+	if config.IsInputEnabled("stdin") && len(enabledInputs) > 1 {
+		return nil, fmt.Errorf("stdin requires to be run in exclusive mode, configured inputs: %s", strings.Join(enabledInputs, ", "))
+	}
+
+	fb := &Filebeat{
+		done:           make(chan struct{}),
+		config:         &config,
+		moduleRegistry: moduleRegistry,
+		pluginFactory:  plugins,
+	}
+
+	err = fb.setupPipelineLoaderCallback(b)
+	if err != nil {
+		return nil, err
+	}
+
+	return fb, nil
 }
 
 // setupPipelineLoaderCallback sets the callback function for loading pipelines during setup.
