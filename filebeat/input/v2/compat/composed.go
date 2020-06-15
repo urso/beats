@@ -56,17 +56,16 @@ func (f composeFactory) CheckConfig(cfg *common.Config) error {
 func (f composeFactory) Create(
 	p beat.PipelineConnector,
 	config *common.Config,
-	meta *common.MapStrPointer,
 ) (cfgfile.Runner, error) {
 	var runner cfgfile.Runner
 	var err1, err2 error
 
-	runner, err1 = f.factory.Create(p, config, meta)
+	runner, err1 = f.factory.Create(p, config)
 	if err1 == nil {
 		return runner, nil
 	}
 
-	runner, err2 = f.fallback.Create(p, config, meta)
+	runner, err2 = f.fallback.Create(p, config)
 	if err2 == nil {
 		return runner, nil
 	}

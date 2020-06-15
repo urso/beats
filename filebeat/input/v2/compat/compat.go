@@ -67,7 +67,6 @@ func (f *factory) CheckConfig(cfg *common.Config) error {
 func (f *factory) Create(
 	p beat.PipelineConnector,
 	config *common.Config,
-	meta *common.MapStrPointer,
 ) (cfgfile.Runner, error) {
 	input, err := f.loader.Configure(config)
 	if err != nil {
