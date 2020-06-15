@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/app"
+
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/agent/application/filters"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/agent/application/info"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/agent/errors"
@@ -18,15 +20,12 @@ import (
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/config"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/logger"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/app/monitoring"
+	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/server"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/fleetapi"
 	reporting "github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/reporter"
 	fleetreporter "github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/reporter/fleet"
 	logreporter "github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/reporter/log"
 )
-
-type managementCfg struct {
-	Management *config.Config `config:"management"`
-}
 
 type apiClient interface {
 	Send(
@@ -48,6 +47,7 @@ type Managed struct {
 	api         apiClient
 	agentInfo   *info.AgentInfo
 	gateway     *fleetGateway
+	srv         *server.Server
 }
 
 func newManaged(
@@ -61,7 +61,7 @@ func newManaged(
 		return nil, err
 	}
 
-	path := fleetAgentConfigPath()
+	path := info.AgentConfigFile()
 
 	// TODO(ph): Define the encryption password.
 	store := storage.NewEncryptedDiskStore(path, []byte(""))
@@ -92,7 +92,7 @@ func newManaged(
 	}
 
 	// Extract only management related configuration.
-	managementCfg := &managementCfg{}
+	managementCfg := &Config{}
 	if err := rawConfig.Unpack(managementCfg); err != nil {
 		return nil, errors.New(err,
 			fmt.Sprintf("fail to unpack configuration from %s", path),
@@ -114,6 +114,10 @@ func newManaged(
 	}
 
 	managedApplication.bgContext, managedApplication.cancelCtxFn = context.WithCancel(ctx)
+	managedApplication.srv, err = server.NewFromConfig(log, rawConfig, &app.ApplicationStatusHandler{})
+	if err != nil {
+		return nil, errors.New(err, "initialize GRPC listener")
+	}
 
 	logR := logreporter.NewReporter(log, cfg.Reporting.Log)
 	fleetR, err := fleetreporter.NewReporter(agentInfo, log, cfg.Reporting.Fleet)
@@ -127,7 +131,7 @@ func newManaged(
 		return nil, errors.New(err, "failed to initialize monitoring")
 	}
 
-	router, err := newRouter(log, streamFactory(managedApplication.bgContext, rawConfig, client, combinedReporter, monitor))
+	router, err := newRouter(log, streamFactory(managedApplication.bgContext, rawConfig, managedApplication.srv, combinedReporter, monitor))
 	if err != nil {
 		return nil, errors.New(err, "fail to initialize pipeline router")
 	}
@@ -149,9 +153,9 @@ func newManaged(
 	batchedAcker := newLazyAcker(acker)
 
 	// Create the action store that will persist the last good policy change on disk.
-	actionStore, err := newActionStore(log, storage.NewDiskStore(fleetActionStoreFile()))
+	actionStore, err := newActionStore(log, storage.NewDiskStore(info.AgentActionStoreFile()))
 	if err != nil {
-		return nil, errors.New(err, fmt.Sprintf("fail to read action store '%s'", fleetActionStoreFile()))
+		return nil, errors.New(err, fmt.Sprintf("fail to read action store '%s'", info.AgentActionStoreFile()))
 	}
 	actionAcker := newActionStoreAcker(batchedAcker, actionStore)
 
@@ -204,6 +208,9 @@ func newManaged(
 // Start starts a managed elastic-agent.
 func (m *Managed) Start() error {
 	m.log.Info("Agent is starting")
+	if err := m.srv.Start(); err != nil {
+		return err
+	}
 	m.gateway.Start()
 	return nil
 }
@@ -212,7 +219,7 @@ func (m *Managed) Start() error {
 func (m *Managed) Stop() error {
 	defer m.log.Info("Agent is stopped")
 	m.cancelCtxFn()
-	m.gateway.Stop()
+	m.srv.Stop()
 	return nil
 }
 

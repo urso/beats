@@ -84,9 +84,6 @@ func newInput(
 
 	var out channel.Outleter
 	out, err = connector.ConnectWith(cfg, beat.ClientConfig{
-		Processing: beat.ProcessingConfig{
-			DynamicFields: inputContext.DynamicFields,
-		},
 		ACKHandler: acker.ConnectionOnly(
 			acker.LastEventPrivateReporter(func(_ int, private interface{}) {
 				// Errors don't have a cursor.

@@ -33,6 +33,8 @@ import (
 	"strings"
 	"time"
 
+	"go.elastic.co/apm"
+
 	"github.com/gofrs/uuid"
 	errw "github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -121,6 +123,7 @@ var debugf = logp.MakeDebug("beat")
 
 func init() {
 	initRand()
+	preventDefaultTracing()
 }
 
 // initRand initializes the runtime random number generator seed using
@@ -138,6 +141,16 @@ func initRand() {
 		seed = n.Int64()
 	}
 	rand.Seed(seed)
+}
+
+func preventDefaultTracing() {
+	// By default, the APM tracer is active. We switch behaviour to not require users to have
+	// an APM Server running, making it opt-in
+	if os.Getenv("ELASTIC_APM_ACTIVE") == "" {
+		os.Setenv("ELASTIC_APM_ACTIVE", "false")
+	}
+	// we need to close the default tracer to prevent the beat sending events to localhost:8200
+	apm.DefaultTracer.Close()
 }
 
 // Run initializes and runs a Beater implementation. name is the name of the
@@ -317,12 +330,12 @@ func (b *Beat) createBeater(bt beat.Creator) (beat.Beater, error) {
 
 	// Report central management state
 	mgmt := monitoring.GetNamespace("state").GetRegistry().NewRegistry("management")
-	monitoring.NewBool(mgmt, "enabled").Set(b.ConfigManager.Enabled())
+	monitoring.NewBool(mgmt, "enabled").Set(b.Manager.Enabled())
 
 	debugf("Initializing output plugins")
 	outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
 	if !outputEnabled {
-		if b.ConfigManager.Enabled() {
+		if b.Manager.Enabled() {
 			logp.Info("Output is configured through Central Management")
 		} else {
 			msg := "No outputs are defined. Please define one under the output section."
@@ -331,11 +344,17 @@ func (b *Beat) createBeater(bt beat.Creator) (beat.Beater, error) {
 		}
 	}
 
+	tracer, err := apm.NewTracer(b.Info.Beat, b.Info.Version)
+	if err != nil {
+		return nil, err
+	}
+
 	pipeline, err := pipeline.Load(b.Info,
 		pipeline.Monitors{
 			Metrics:   reg,
 			Telemetry: monitoring.GetNamespace("state").GetRegistry(),
 			Logger:    logp.L().Named("publisher"),
+			Tracer:    tracer,
 		},
 		b.Config.Pipeline,
 		b.processing,
@@ -369,6 +388,12 @@ func (b *Beat) launch(settings Settings, bt beat.Creator) error {
 	if err != nil {
 		return err
 	}
+
+	// Windows: Mark service as stopped.
+	// After this is run, a Beat service is considered by the OS to be stopped
+	// and another instance of the process can be started.
+	// This must be the first deferred cleanup task (last to execute).
+	defer svc.NotifyTermination()
 
 	// Try to acquire exclusive lock on data path to prevent another beat instance
 	// sharing same data path.
@@ -437,8 +462,8 @@ func (b *Beat) launch(settings Settings, bt beat.Creator) error {
 	logp.Info("%s start running.", b.Info.Beat)
 
 	// Launch config manager
-	b.ConfigManager.Start()
-	defer b.ConfigManager.Stop()
+	b.Manager.Start(beater.Stop)
+	defer b.Manager.Stop()
 
 	return beater.Run(&b.Beat)
 }
@@ -618,12 +643,12 @@ func (b *Beat) configure(settings Settings) error {
 	logp.Info("Beat ID: %v", b.Info.ID)
 
 	// initialize config manager
-	b.ConfigManager, err = management.Factory(b.Config.Management)(b.Config.Management, reload.Register, b.Beat.Info.ID)
+	b.Manager, err = management.Factory(b.Config.Management)(b.Config.Management, reload.Register, b.Beat.Info.ID)
 	if err != nil {
 		return err
 	}
 
-	if err := b.ConfigManager.CheckRawConfig(b.RawConfig); err != nil {
+	if err := b.Manager.CheckRawConfig(b.RawConfig); err != nil {
 		return err
 	}
 

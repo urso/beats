@@ -27,7 +27,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common"
 )
 
-func TestConverter(t *testing.T) {
+func TestConversionWithMapStr(t *testing.T) {
 	t.Run("from MapStr", func(t *testing.T) {
 		type testStruct struct {
 			A int
@@ -45,7 +45,47 @@ func TestConverter(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, common.MapStr{"a": "test"}, m)
 	})
+}
 
+func TestConversionBetweenGoTypes(t *testing.T) {
+	t.Run("int to uint", func(t *testing.T) {
+		var i = 42
+		var u uint
+		err := Convert(&u, i)
+		require.NoError(t, err)
+		assert.Equal(t, uint(42), u)
+	})
+
+	t.Run("between structs", func(t *testing.T) {
+		type To struct {
+			A uint
+			F float64
+			B string
+		}
+
+		input := struct {
+			A      int
+			F      float64
+			B      string
+			Ignore uint
+		}{100, 3.14, "test", 42}
+
+		var actual To
+		err := Convert(&actual, input)
+		require.NoError(t, err)
+
+		want := To{100, 3.14, "test"}
+		assert.Equal(t, want, actual)
+	})
+
+	t.Run("string is parsed to int", func(t *testing.T) {
+		var to int
+		require.NoError(t, Convert(&to, 1))
+		assert.Equal(t, 1, to)
+	})
+}
+
+func TestTimestamps(t *testing.T) {
 	t.Run("timestamp to MapStr", func(t *testing.T) {
 		var m common.MapStr
 		ts := time.Unix(1234, 5678).UTC()
@@ -139,6 +179,75 @@ func TestConverter(t *testing.T) {
 		assert.Equal(t, uint64(1588281836441904), cp.RealtimeTimestamp)
 		assert.Equal(t, uint64(24881645756), cp.MonotonicTimestamp)
 	})
+}
+
+func testDecodeTimestamp(t *testing.T, a, b uint64) time.Time {
+	ts, err := bitsToTimestamp(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ts
+}
+
+func TestComplexExampleWithIntermediateConversion(t *testing.T) {
+	type checkpoint struct {
+		Version            int
+		Position           string
+		RealtimeTimestamp  uint64
+		MonotonicTimestamp uint64
+	}
+
+	type (
+		stateInternal struct {
+			TTL     time.Duration
+			Updated time.Time
+		}
+
+		state struct {
+			Internal stateInternal
+			Cursor   interface{}
+		}
+	)
+
+	input := common.MapStr{
+		"_key": "test",
+		"internal": common.MapStr{
+			"ttl":     float64(1800000000000),
+			"updated": []interface{}{float64(515579904576), float64(1588432943)},
+		},
+		"cursor": common.MapStr{
+			"monotonictimestamp": float64(24881645756),
+			"position":           "s=86a99d3589f54f01804e844bebd787d5;i=4d19f;b=9c5d2b320b7946b4be53c0940a5b1289;m=5cb0fc8bc;t=5a488aeaa1130;x=ccbe23f507e8d0a4",
+			"realtimetimestamp":  float64(1588281836441904),
+			"version":            float64(1),
+		},
+	}
+
+	var st state
+	if err := Convert(&st, input); err != nil {
+		t.Fatalf("failed to unpack checkpoint: %+v", err)
+	}
+	assert.Equal(t, time.Duration(1800000000000), st.Internal.TTL)
+	assert.Equal(t, testDecodeTimestamp(t, 515579904576, 1588432943), st.Internal.Updated)
+	require.True(t, st.Cursor != nil)
+
+	var cp checkpoint
+	if err := Convert(&cp, st.Cursor); err != nil {
+		t.Fatalf("failed to unpack cursor: %+v", err)
+	}
+
+	assert.Equal(t, 1, cp.Version)
+	assert.Equal(t, "s=86a99d3589f54f01804e844bebd787d5;i=4d19f;b=9c5d2b320b7946b4be53c0940a5b1289;m=5cb0fc8bc;t=5a488aeaa1130;x=ccbe23f507e8d0a4", cp.Position)
+	assert.Equal(t, uint64(1588281836441904), cp.RealtimeTimestamp)
+	assert.Equal(t, uint64(24881645756), cp.MonotonicTimestamp)
+}
+
+func TestFailOnIncompatibleTypes(t *testing.T) {
+	t.Run("primitive value to struct fails", func(t *testing.T) {
+		var to struct{ A int }
+		require.Error(t, Convert(&to, 1))
+	})
+
 }
 
 func testDecodeTimestamp(t *testing.T, a, b uint64) time.Time {

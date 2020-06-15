@@ -10,7 +10,8 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/state"
 
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/agent/configrequest"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/agent/errors"
@@ -23,9 +24,12 @@ import (
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/logger"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/app"
 	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/app/monitoring"
-	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/retry"
-	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/plugin/state"
-	rconfig "github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/remoteconfig/grpc"
+	"github.com/elastic/beats/v7/x-pack/elastic-agent/pkg/core/server"
+)
+
+const (
+	isMonitoringMetricsFlag = 1 << 0
+	isMonitoringLogsFlag    = 1 << 1
 )
 
 // Operator runs Start/Stop/Update operations
@@ -40,14 +44,16 @@ type Operator struct {
 	config         *operatorCfg.Config
 	handlers       map[string]handleFunc
 	stateResolver  *stateresolver.StateResolver
+	srv            *server.Server
 	eventProcessor callbackHooks
 	monitor        monitoring.Monitor
-	isMonitoring   bool
+	isMonitoring   int
 
 	apps     map[string]Application
 	appsLock sync.Mutex
 
 	downloader download.Downloader
+	verifier   download.Verifier
 	installer  install.Installer
 }
 
@@ -60,12 +66,14 @@ func NewOperator(
 	pipelineID string,
 	config *config.Config,
 	fetcher download.Downloader,
+	verifier download.Verifier,
 	installer install.Installer,
 	stateResolver *stateresolver.StateResolver,
+	srv *server.Server,
 	eventProcessor callbackHooks,
 	monitor monitoring.Monitor) (*Operator, error) {
 
-	operatorConfig := defaultOperatorConfig()
+	operatorConfig := operatorCfg.DefaultConfig()
 	if err := config.Unpack(&operatorConfig); err != nil {
 		return nil, err
 	}
@@ -84,8 +92,10 @@ func NewOperator(
 		pipelineID:     pipelineID,
 		logger:         logger,
 		downloader:     fetcher,
+		verifier:       verifier,
 		installer:      installer,
 		stateResolver:  stateResolver,
+		srv:            srv,
 		apps:           make(map[string]Application),
 		eventProcessor: eventProcessor,
 		monitor:        monitor,
@@ -99,20 +109,8 @@ func NewOperator(
 	return operator, nil
 }
 
-func defaultOperatorConfig() *operatorCfg.Config {
-	return &operatorCfg.Config{
-		RetryConfig: &retry.Config{
-			Enabled:      false,
-			RetriesCount: 0,
-			Delay:        30 * time.Second,
-			MaxDelay:     5 * time.Minute,
-			Exponential:  false,
-		},
-	}
-}
-
 // State describes the current state of the system.
-// Reports all known beats and theirs states. Whether they are running
+// Reports all known applications and theirs states. Whether they are running
 // or not, and if they are information about process is also present.
 func (o *Operator) State() map[string]state.State {
 	result := make(map[string]state.State)
@@ -163,10 +161,14 @@ func (o *Operator) HandleConfig(cfg configrequest.Request) error {
 // specific configuration of new process is passed
 func (o *Operator) start(p Descriptor, cfg map[string]interface{}) (err error) {
 	flow := []operation{
-		newOperationFetch(o.logger, p, o.config, o.downloader, o.eventProcessor),
-		newOperationVerify(o.eventProcessor),
+		newRetryableOperations(
+			o.logger,
+			o.config.RetryConfig,
+			newOperationFetch(o.logger, p, o.config, o.downloader, o.eventProcessor),
+			newOperationVerify(p, o.config, o.verifier, o.eventProcessor),
+		),
 		newOperationInstall(o.logger, p, o.config, o.installer, o.eventProcessor),
-		newOperationStart(o.logger, o.config, cfg, o.eventProcessor),
+		newOperationStart(o.logger, p, o.config, cfg, o.eventProcessor),
 		newOperationConfig(o.logger, o.config, cfg, o.eventProcessor),
 	}
 	return o.runFlow(p, flow)
@@ -183,19 +185,8 @@ func (o *Operator) stop(p Descriptor) (err error) {
 
 // PushConfig tries to push config to a running process
 func (o *Operator) pushConfig(p Descriptor, cfg map[string]interface{}) error {
-	var flow []operation
-	configurable := p.IsGrpcConfigurable()
-
-	if configurable {
-		flow = []operation{
-			newOperationConfig(o.logger, o.config, cfg, o.eventProcessor),
-		}
-	} else {
-		flow = []operation{
-			// updates a configuration file and restarts a process
-			newOperationStop(o.logger, o.config, o.eventProcessor),
-			newOperationStart(o.logger, o.config, cfg, o.eventProcessor),
-		}
+	flow := []operation{
+		newOperationConfig(o.logger, o.config, cfg, o.eventProcessor),
 	}
 
 	return o.runFlow(p, flow)
@@ -217,7 +208,7 @@ func (o *Operator) runFlow(p Descriptor, operations []operation) error {
 			return err
 		}
 
-		shouldRun, err := op.Check()
+		shouldRun, err := op.Check(app)
 		if err != nil {
 			return err
 		}
@@ -233,6 +224,11 @@ func (o *Operator) runFlow(p Descriptor, operations []operation) error {
 		}
 	}
 
+	// when application is stopped remove from the operator
+	if app.State().Status == state.Stopped {
+		o.deleteApp(p)
+	}
+
 	return nil
 }
 
@@ -242,18 +238,30 @@ func (o *Operator) getApp(p Descriptor) (Application, error) {
 
 	id := p.ID()
 
+	o.logger.Debugf("operator is looking for %s in app collection: %v", p.ID(), o.apps)
 	if a, ok := o.apps[id]; ok {
 		return a, nil
 	}
-
-	factory := rconfig.NewConnFactory(o.config.RetryConfig.Delay, o.config.RetryConfig.MaxDelay)
 
 	specifier, ok := p.(app.Specifier)
 	if !ok {
 		return nil, fmt.Errorf("descriptor is not an app.Specifier")
 	}
 
-	a, err := app.NewApplication(o.bgContext, p.ID(), p.BinaryName(), o.pipelineID, specifier, factory, o.config, o.logger, o.eventProcessor.OnFailing, o.monitor)
+	// TODO: (michal) join args into more compact options version
+	a, err := app.NewApplication(
+		o.bgContext,
+		p.ID(),
+		p.BinaryName(),
+		o.pipelineID,
+		o.config.LoggingConfig.Level.String(),
+		specifier,
+		o.srv,
+		o.config,
+		o.logger,
+		o.eventProcessor.OnFailing,
+		o.monitor)
+
 	if err != nil {
 		return nil, err
 	}
@@ -262,16 +270,17 @@ func (o *Operator) getApp(p Descriptor) (Application, error) {
 	return a, nil
 }
 
+func (o *Operator) deleteApp(p Descriptor) {
+	o.appsLock.Lock()
+	defer o.appsLock.Unlock()
+
+	id := p.ID()
+
+	o.logger.Debugf("operator is removing %s from app collection: %v", p.ID(), o.apps)
+	delete(o.apps, id)
+}
+
 func isMonitorable(descriptor Descriptor) bool {
-	type taggable interface {
-		Tags() map[app.Tag]string
-	}
-
-	if taggable, ok := descriptor.(taggable); ok {
-		tags := taggable.Tags()
-		_, isSidecar := tags[app.TagSidecar]
-		return !isSidecar // everything is monitorable except sidecar
-	}
-
-	return false
+	isSidecar := app.IsSidecar(descriptor)
+	return !isSidecar // everything is monitorable except sidecar
 }

@@ -133,8 +133,9 @@ func New(plugins PluginFactory) beat.Creator {
 				return nil, errors.New("no modules or inputs enabled and configuration reloading disabled. What files do you want me to watch?")
 			}
 
-			// in the `setup` command, log this only as a warning
-			logp.Warn("Setup called, but no modules enabled.")
+	if !config.ConfigInput.Enabled() && !config.ConfigModules.Enabled() && !haveEnabledInputs && config.Autodiscover == nil && !b.Manager.Enabled() {
+		if !b.InSetupCmd {
+			return nil, errors.New("no modules or inputs enabled and configuration reloading disabled. What files do you want me to watch?")
 		}
 
 		if *once && config.ConfigInput.Enabled() && config.ConfigModules.Enabled() {

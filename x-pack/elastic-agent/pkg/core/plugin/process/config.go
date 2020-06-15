@@ -8,14 +8,16 @@ import "time"
 
 // Config for fine tuning new process
 type Config struct {
-	MinPortNumber int           `yaml:"min_port" config:"min_port"`
-	MaxPortNumber int           `yaml:"max_port" config:"max_port"`
-	SpawnTimeout  time.Duration `yaml:"spawn_timeout" config:"spawn_timeout"`
-
-	// Transport is one of `unix` or `tcp`. `unix` uses unix sockets and is not supported on windows.
-	// Windows falls back to `tcp` regardless of configuration.
-	// With invalid configuration fallback to `tcp` is used as well.
-	Transport string
+	SpawnTimeout time.Duration `yaml:"spawn_timeout" config:"spawn_timeout"`
+	StopTimeout  time.Duration `yaml:"stop_timeout" config:"stop_timeout"`
 
 	// TODO: cgroups and namespaces
+}
+
+// DefaultConfig creates a config with pre-set default values.
+func DefaultConfig() *Config {
+	return &Config{
+		SpawnTimeout: 30 * time.Second,
+		StopTimeout:  30 * time.Second,
+	}
 }

@@ -32,7 +32,7 @@ type onCreateFactory struct {
 	create  onCreateWrapper
 }
 
-type onCreateWrapper func(cfgfile.RunnerFactory, beat.PipelineConnector, *common.Config, *common.MapStrPointer) (cfgfile.Runner, error)
+type onCreateWrapper func(cfgfile.RunnerFactory, beat.PipelineConnector, *common.Config) (cfgfile.Runner, error)
 
 // commonInputConfig defines common input settings
 // for the publisher pipeline.
@@ -41,6 +41,10 @@ type commonInputConfig struct {
 	common.EventMetadata `config:",inline"`      // Fields and tags to add to events.
 	Processors           processors.PluginConfig `config:"processors"`
 	KeepNull             bool                    `config:"keep_null"`
+
+	PublisherPipeline struct {
+		DisableHost bool `config:"disable_host"` // Disable addition of host.name.
+	} `config:"publisher_pipeline"`
 
 	// implicit event fields
 	Type        string `config:"type"`         // input.type
@@ -59,12 +63,8 @@ func (f *onCreateFactory) CheckConfig(cfg *common.Config) error {
 	return f.factory.CheckConfig(cfg)
 }
 
-func (f *onCreateFactory) Create(
-	pipeline beat.PipelineConnector,
-	cfg *common.Config,
-	meta *common.MapStrPointer,
-) (cfgfile.Runner, error) {
-	return f.create(f.factory, pipeline, cfg, meta)
+func (f *onCreateFactory) Create(pipeline beat.PipelineConnector, cfg *common.Config) (cfgfile.Runner, error) {
+	return f.create(f.factory, pipeline, cfg)
 }
 
 // RunnerFactoryWithCommonInputSettings wraps a runner factory, such that all runners
@@ -89,14 +89,13 @@ func RunnerFactoryWithCommonInputSettings(info beat.Info, f cfgfile.RunnerFactor
 			f cfgfile.RunnerFactory,
 			pipeline beat.PipelineConnector,
 			cfg *common.Config,
-			meta *common.MapStrPointer,
 		) (runner cfgfile.Runner, err error) {
 			pipeline, err = withClientConfig(info, pipeline, cfg)
 			if err != nil {
 				return nil, err
 			}
 
-			return f.Create(pipeline, cfg, meta)
+			return f.Create(pipeline, cfg)
 		})
 }
 
@@ -184,6 +183,7 @@ func newCommonConfigEditor(
 		clientCfg.Processing.Fields = fields
 		clientCfg.Processing.Processor = procs
 		clientCfg.Processing.KeepNull = config.KeepNull
+		clientCfg.Processing.DisableHost = config.PublisherPipeline.DisableHost
 
 		return clientCfg, nil
 	}, nil

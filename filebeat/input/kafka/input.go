@@ -70,9 +70,6 @@ func NewInput(
 	}
 
 	out, err := connector.ConnectWith(cfg, beat.ClientConfig{
-		Processing: beat.ProcessingConfig{
-			DynamicFields: inputContext.DynamicFields,
-		},
 		ACKHandler: acker.ConnectionOnly(
 			acker.EventPrivateReporter(func(_ int, events []interface{}) {
 				for _, event := range events {
