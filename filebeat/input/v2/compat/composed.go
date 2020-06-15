@@ -22,7 +22,6 @@ import (
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/cfgfile"
 	"github.com/elastic/beats/v7/libbeat/common"
-	"github.com/urso/sderr"
 )
 
 type composeFactory struct {
@@ -46,10 +45,9 @@ func Combine(factory, fallback cfgfile.RunnerFactory) cfgfile.RunnerFactory {
 
 func (f composeFactory) CheckConfig(cfg *common.Config) error {
 	err := f.factory.CheckConfig(cfg)
-	if err == nil {
-		return nil
+	if !v2.IsUnknownInputError(err) {
+		return err
 	}
-
 	return f.fallback.CheckConfig(cfg)
 }
 
@@ -71,7 +69,7 @@ func (f composeFactory) Create(
 	}
 
 	// return err2 only if err1 indicates that the input type is not known to f.factory
-	if sderr.Is(err1, v2.ErrUnknown) {
+	if v2.IsUnknownInputError(err1) {
 		return nil, err2
 	}
 	return nil, err1
