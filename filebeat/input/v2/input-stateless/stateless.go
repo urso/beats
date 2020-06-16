@@ -52,10 +52,12 @@ type configuredInput struct {
 
 var _ v2.InputManager = InputManager{}
 
+// NewInputManager wraps the given configure function to create a new stateless input manager.
 func NewInputManager(configure func(*common.Config) (Input, error)) InputManager {
 	return InputManager{Configure: configure}
 }
 
+// Init does nothing. Init is required to fullfil the v2.InputManager interface.
 func (m InputManager) Init(_ unison.Group, _ v2.Mode) error { return nil }
 
 // Create configures a transient input and ensures that the final input can be used with
