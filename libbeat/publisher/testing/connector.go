@@ -17,7 +17,15 @@
 
 package testing
 
-import "github.com/elastic/beats/v7/libbeat/beat"
+import (
+	"github.com/elastic/beats/v7/libbeat/beat"
+	"github.com/elastic/beats/v7/libbeat/common/atomic"
+)
+
+type ClientCounter struct {
+	total  atomic.Int
+	active atomic.Int
+}
 
 type FakeConnector struct {
 	ConnectFunc func(beat.ClientConfig) (beat.Client, error)
@@ -55,5 +63,46 @@ func (c *FakeClient) Close() error {
 func (c *FakeClient) PublishAll(events []beat.Event) {
 	for _, event := range events {
 		c.Publish(event)
+	}
+}
+
+func FailingConnector(err error) beat.PipelineConnector {
+	return &FakeConnector{
+		ConnectFunc: func(_ beat.ClientConfig) (beat.Client, error) {
+			return nil, err
+		},
+	}
+}
+
+func ConstClient(client beat.Client) beat.PipelineConnector {
+	return &FakeConnector{
+		ConnectFunc: func(_ beat.ClientConfig) (beat.Client, error) {
+			return client, nil
+		},
+	}
+}
+
+func ChClient(ch chan beat.Event) beat.Client {
+	return &FakeClient{
+		PublishFunc: func(event beat.Event) {
+			ch <- event
+		},
+	}
+}
+
+func (c *ClientCounter) Active() int { return c.active.Load() }
+func (c *ClientCounter) Total() int  { return c.total.Load() }
+func (c *ClientCounter) BuildConnector() beat.PipelineConnector {
+	return FakeConnector{
+		ConnectFunc: func(_ beat.ClientConfig) (beat.Client, error) {
+			c.total.Inc()
+			c.active.Inc()
+			return &FakeClient{
+				CloseFunc: func() error {
+					c.active.Dec()
+					return nil
+				},
+			}, nil
+		},
 	}
 }
