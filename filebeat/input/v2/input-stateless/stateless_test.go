@@ -143,6 +143,7 @@ func TestStateless_Run(t *testing.T) {
 }
 
 func (f *fakeStatelessInput) Name() string { return "test" }
+
 func (f *fakeStatelessInput) Test(ctx v2.TestContext) error {
 	if f.OnTest != nil {
 		return f.OnTest(ctx)
@@ -161,12 +162,6 @@ func createConfiguredInput(t *testing.T, manager stateless.InputManager, config 
 	input, err := manager.Create(common.MustNewConfigFrom(config))
 	require.NoError(t, err)
 	return input
-}
-
-func failingInputManager(err error) stateless.InputManager {
-	return stateless.NewInputManager(func(_ *common.Config) (stateless.Input, error) {
-		return nil, err
-	})
 }
 
 func constInputManager(input stateless.Input) stateless.InputManager {
