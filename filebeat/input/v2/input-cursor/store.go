@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/elastic/beats/v7/libbeat/common/atomic"
+	"github.com/elastic/beats/v7/libbeat/common/cleanup"
 	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
@@ -134,7 +135,7 @@ func openStore(log *logp.Logger, statestore StateStore, prefix string) (*store, 
 	if err != nil {
 		return nil, err
 	}
-	defer ifNotOK(&ok, func() { persistentStore.Close() })
+	defer cleanup.IfNot(&ok, func() { persistentStore.Close() })
 
 	states, err := readStates(log, persistentStore, prefix)
 	if err != nil {
