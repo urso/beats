@@ -193,51 +193,6 @@ func (s *store) UpdateTTL(resource *resource, ttl time.Duration) {
 	}
 }
 
-/*
-func (s *store) UpdateInternal(resource *resource) {
-	data := &resource.state
-	if data.Updated.IsZero() {
-		data.Updated = time.Now()
-	}
-
-	err := s.persistentStore.Set(resource.key, resource.state)
-	if err != nil {
-		s.log.Errorf("Failed to update resource management fields for '%v'", resource.key)
-		resource.internalInSync = false
-	} else {
-		resource.stored = true
-		resource.internalInSync = true
-	}
-}
-
-func (s *store) UpdateCursor(resource *resource, timestamp time.Time, updates interface{}) {
-	key := statestore.Key(resource.key)
-	updateCommand := registryStateUpdateCursor{
-		Internal: stateInternalUpdated{Updated: timestamp},
-		Cursor:   updates,
-	}
-
-	err := s.persistentStore.Update(func(tx *statestore.Tx) error {
-		if !resource.internalInSync {
-			internalUpdCommand := registryStateUpdateInternal{Internal: resource.state.Internal}
-			if err := tx.Update(key, internalUpdCommand); err != nil {
-				return err
-			}
-		}
-		return tx.Update(key, updateCommand)
-	})
-	if err != nil {
-		if !statestore.IsClosed(err) {
-			s.log.Errorf("Failed to update state in the registry for '%v'", key)
-		}
-	} else {
-		resource.internalInSync = true
-		resource.stored = true
-	}
-}
-
-*/
-
 func (s *states) Find(key string, create bool) *resource {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -300,16 +255,6 @@ func (r *resource) UnpackCursor(to interface{}) error {
 	}
 	return typeconv.Convert(to, r.pendingCursor)
 }
-
-/*
-func (e *resource) SetCursor(c interface{}) {
-	e.state.Cursor = c
-}
-
-func (e *resource) UpdateCursor(val interface{}) error {
-	return typeconv.Convert(&e.state.Cursor, val)
-}
-*/
 
 func readStates(log *logp.Logger, store *statestore.Store, prefix string) (*states, error) {
 	keyPrefix := prefix + "::"
