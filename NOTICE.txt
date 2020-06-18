@@ -1928,8 +1928,7 @@ SOFTWARE
 
 --------------------------------------------------------------------
 Dependency: github.com/elastic/go-concert
-Version: v0.0.2
-Revision: ffc76909ee23
+Version: v0.0.3
 License type (autodetected): Apache-2.0
 ./vendor/github.com/elastic/go-concert/LICENSE:
 --------------------------------------------------------------------
