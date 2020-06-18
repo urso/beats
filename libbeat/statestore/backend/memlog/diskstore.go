@@ -178,7 +178,11 @@ func (s *diskstore) mustCheckpoint() bool {
 
 func (s *diskstore) Close() error {
 	if s.logFile != nil {
-		err := syncFile(s.logFile) // always sync log file on ordinary shutdown.
+		// always sync log file on ordinary shutdown.
+		err := s.logBuf.Flush()
+		if err == nil {
+			err = syncFile(s.logFile)
+		}
 		s.logFile.Close()
 		s.logFile = nil
 		s.logBuf = nil
