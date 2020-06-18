@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,20 +53,28 @@ type diskstore struct {
 	logNeedsTruncate bool
 }
 
-type storeEntry struct {
-	Key    string        `struct:"_key"`
-	Fields common.MapStr `struct:",inline"`
-}
-
+// dataFileInfo is used to track and sort on disk data files.
+// We should have only one data file on disk, but in case delete operations
+// have failed or not finished dataFileInfo is used to detect the ordering.
 type dataFileInfo struct {
 	path string
 	txid uint64
 }
 
+// storeEntry is used to write entries to the checkpoint file only.
+type storeEntry struct {
+	Key    string        `struct:"_key"`
+	Fields common.MapStr `struct:",inline"`
+}
+
+// storeMeta is read from the meta file.
 type storeMeta struct {
 	Version string `struct:"version"`
 }
 
+// logAction is prepended to each operation logged to the update file.
+// It contains the update ID, a sequential counter to track correctness,
+// and the action name.
 type logAction struct {
 	Op string `json:"op"`
 	ID uint64 `json:"id"`
@@ -80,6 +89,10 @@ const (
 	keyField = "_key"
 )
 
+// newDiskStorek initializes the disk store stucture only. The store must have
+// been opened already.  It tries to open the update log file for append
+// operations. If opening the update log file fails, it is marked as
+// 'corrupted', triggering a checkpoint operation on the first update to the store.
 func newDiskStore(
 	log *logp.Logger,
 	home string,
@@ -111,6 +124,10 @@ func newDiskStore(
 	return s
 }
 
+// tryOpenLog access the update log. The log file is truncated if a checkpoint operation has been
+// executed last.
+// The log file is marked as invalid if opening it failed. This will trigger a checkpoint operation
+// and another call to tryOpenLog in the future.
 func (s *diskstore) tryOpenLog() error {
 	flags := os.O_RDWR | os.O_CREATE
 	if s.logNeedsTruncate {
@@ -152,13 +169,17 @@ func (s *diskstore) tryOpenLog() error {
 	return nil
 }
 
+// mustCheckpoint returns true if the store is required to execute a checkpoint
+// operation, either by predicate or by some internal state detecting a problem
+// with the log file.
 func (s *diskstore) mustCheckpoint() bool {
 	return s.logInvalid || s.checkpointPred(s.logFileSize)
 }
 
 func (s *diskstore) Close() error {
 	if s.logFile != nil {
-		err := s.logFile.Close()
+		err := syncFile(s.logFile) // always sync log file on ordinary shutdown.
+		s.logFile.Close()
 		s.logFile = nil
 		s.logBuf = nil
 		return err
@@ -166,11 +187,10 @@ func (s *diskstore) Close() error {
 	return nil
 }
 
+// log operation adds another entry to the update log file.
+// The log file is marked as invalid if the write fails. This will trigger a
+// checkpoint operation in the future.
 func (s *diskstore) LogOperation(op op) error {
-	return s.addOperation(op)
-}
-
-func (s *diskstore) addOperation(op op) error {
 	if s.logInvalid {
 		return errLogInvalid
 	}
@@ -222,6 +242,17 @@ func (s *diskstore) addOperation(op op) error {
 	return nil
 }
 
+// WriteCheckpoint serializes all state into a json file. The file contains an
+// array with all states known to the memory storage.
+// WriteCheckpoint first serializes all state to a temporary file, and finally
+// replaces move the temporary data file into the correct location. No files
+// are overwritten or replaced. Instead the change sequence number is used for
+// the filename, and older data files will be deleleted after success.
+//
+// The active marker file is overwritten after all updates did succeed. The
+// marker file contains the filename of the current valid data-file.
+// NOTE: due to limitation on some Operating system or file systems, the active
+//       marker is not a symlink, but an actual file.
 func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	tmpPath, err := s.checkpointTmpFile(filepath.Join(s.home, "checkpoint"), state)
 	if err != nil {
@@ -249,7 +280,8 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	})
 
 	// delete old transaction files
-	s.updateActiveSymLink()
+	active, _ := activeDataFile(s.dataFiles)
+	updateActiveMarker(s.log, s.home, active)
 	s.removeOldDataFiles()
 
 	trySyncPath(s.home)
@@ -337,11 +369,40 @@ func (s *diskstore) checkpointClearLog() {
 	s.logFileSize = 0
 }
 
-func (s *diskstore) updateActiveSymLink() error {
-	active, _ := activeDataFile(s.dataFiles)
-	return updateActiveMarker(s.log, s.home, active)
+func updateActiveMarker(log *logp.Logger, home, active string) error {
+	activeLink := filepath.Join(home, "active.dat")
+	tmpLink := filepath.Join(home, "active.dat")
+	log = log.With("temporary", tmpLink, "data_file", active, "link_file", activeLink)
+
+	if active == "" {
+		if err := os.Remove(activeLink); err != nil { // try, remove active symlink if present.
+			log.Errorf("Failed to remove old pointer file: %v", err)
+		}
+		return nil
+	}
+
+	// Atomically try to update the pointer file to the most recent data file.
+	// We 'simulate' the atomic update by create the temporary active.json.tmp symlink file,
+	// which we rename to active.json. If active.json.tmp exists we remove it.
+	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
+		log.Errorf("Failed to remove old temporary symlink file: %v", err)
+		return err
+	}
+	if err := ioutil.WriteFile(tmpLink, []byte(active), 0600); err != nil {
+		log.Errorf("Failed to write temporary pointer file: %v", err)
+		return err
+	}
+	if err := os.Rename(tmpLink, activeLink); err != nil {
+		log.Errorf("Failed to replace link file: %v", err)
+		return err
+	}
+
+	trySyncPath(home)
+	return nil
 }
 
+// removeOldDataFiles sorts the data files by their update sequence number and
+// finally deletes all but the newest file from the storage directory.
 func (s *diskstore) removeOldDataFiles() {
 	L := len(s.dataFiles)
 	if L <= 1 {
@@ -412,9 +473,7 @@ func listDataFiles(home string) ([]dataFileInfo, error) {
 
 	// sort files by transaction ID
 	sort.Slice(infos, func(i, j int) bool {
-		idI := infos[i].txid
-		idJ := infos[j].txid
-		return int64(idI-idJ) < 0 // check idI < idJ (ids can overflow)
+		return isTxIDLessEqual(infos[i].txid, infos[j].txid)
 	})
 	return infos, nil
 }
@@ -594,6 +653,11 @@ func readMetaFile(home string) (storeMeta, error) {
 	return meta, nil
 }
 
+// isTxIDLessEqual compares two IDs by checking that their distance is < 2^63.
+// It always returns true if
+//  - a == b
+//  - a < b (mod 2^63)
+//  - b > a after an integer rollover that is still within the distance of <2^63-1
 func isTxIDLessEqual(a, b uint64) bool {
 	return int64(a-b) <= 0
 }

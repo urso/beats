@@ -28,20 +28,36 @@ import (
 	"github.com/elastic/beats/v7/libbeat/statestore/backend"
 )
 
+// store implements an actual memlog based store.
+// It holds all key value pairs in memory in a memstore struct.
+// All changes to the memstore are logged to the diskstore.
+// The store execute a checkpoint operation if the checkpoint predicate
+// triggers the operation, or if some error in the update log file has been
+// detected by the diskstore.
+//
+// The store allows only one writer, but multiple concurrent readers.
 type store struct {
 	lock sync.RWMutex
 	disk *diskstore
 	mem  memstore
 }
 
+// memstore is the in memory key value store
 type memstore struct {
 	table map[string]entry
 }
 
 type entry struct {
-	value common.MapStr
+	value map[string]interface{}
 }
 
+// openStore opens a store from the home path.
+// The directory and intermediate directories will be created if it does not exist.
+// The open routine loads the full key-value store into memory by first reading the data file and finally applying all outstanding updates
+// from the update log file.
+// If an error in in the log file is detected, the store opening routine continues from the last known valid state and will trigger a checkpoint
+// operation on subsequent writes, also truncating the log file.
+// Old data files are scheduled for deletion later.
 func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, checkpoint CheckpointPredicate) (*store, error) {
 	fi, err := os.Stat(home)
 	if os.IsNotExist(err) {
@@ -100,6 +116,8 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, chec
 	}, nil
 }
 
+// Close closes access to the update log file and clears the in memory key
+// value store. Access to the store after close can lead to a panic.
 func (s *store) Close() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -107,13 +125,16 @@ func (s *store) Close() error {
 	return s.disk.Close()
 }
 
+// Has checks if the key is known. The in memory store does not report any
+// errors.
 func (s *store) Has(key string) (bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	return s.mem.Has(key), nil
 }
 
-func (s *store) Get(key string, into interface{}) error {
+// Get retrieves and decodes the key-value pair into to.
+func (s *store) Get(key string, to interface{}) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -121,9 +142,12 @@ func (s *store) Get(key string, into interface{}) error {
 	if dec == nil {
 		return errKeyUnknown
 	}
-	return dec.Decode(into)
+	return dec.Decode(to)
 }
 
+// Set inserts or overwrites a key-value pair.
+// If encoding was successful the in-memory state will be updated and a
+// set-operation is logged to the diskstore.
 func (s *store) Set(key string, value interface{}) error {
 	var tmp common.MapStr
 	if err := typeconv.Convert(&tmp, value); err != nil {
@@ -137,6 +161,8 @@ func (s *store) Set(key string, value interface{}) error {
 	return s.logOperation(&opSet{K: key, V: tmp})
 }
 
+// Remove removes a key from the in memory store and logs a remove operation to
+// the diskstore. The operation does not check if the key exists.
 func (s *store) Remove(key string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -145,6 +171,9 @@ func (s *store) Remove(key string) error {
 	return s.logOperation(&opRemove{K: key})
 }
 
+// lopOperation ensures that the diskstore reflects the recent changes to the
+// in memory store by either triggering a checkpoint operations or adding the
+// operation type to the update log file.
 func (s *store) logOperation(op op) error {
 	if s.disk.mustCheckpoint() {
 		err := s.disk.WriteCheckpoint(s.mem.table)
@@ -161,6 +190,7 @@ func (s *store) logOperation(op op) error {
 	return s.disk.LogOperation(op)
 }
 
+// Each iterates over all key-value pairs in the store.
 func (s *store) Each(fn func(string, backend.ValueDecoder) (bool, error)) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()

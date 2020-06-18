@@ -23,6 +23,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// syncFile implements the fsync operation for darwin. On darwin fsync is not
+// reliable, instead the fcntl syscall with F_FULLFSYNC must be used.
 func syncFile(f *os.File) error {
 	for {
 		_, err := unix.FcntlInt(f.Fd(), unix.F_FULLFSYNC, 0)

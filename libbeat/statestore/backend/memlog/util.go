@@ -19,18 +19,18 @@ package memlog
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
-	"path/filepath"
 	"syscall"
-
-	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
+// ensureWriter writes the buffer to the underlying writer
+// for as long as w returns a retryable error (e.g. EAGAIN)
+// or the input buffer has been exhausted.
 type ensureWriter struct {
 	w io.Writer
 }
 
+// countWriter keeps track of the amount of bytes written over time.
 type countWriter struct {
 	n uint64
 	w io.Writer
@@ -58,46 +58,14 @@ func isRetryErr(err error) bool {
 	return err == syscall.EINTR || err == syscall.EAGAIN
 }
 
+// trySync provides a best-effort fsync on path (directory). The fsync is required by some
+// filesystems, so to update the parents directory metadata to actually
+// contain the new file being rotated in.
 func trySyncPath(path string) {
-	// best-effort fsync on path (directory). The fsync is required by some
-	// filesystems, so to update the parents directory metadata to actually
-	// contain the new file being rotated in.
 	f, err := os.Open(path)
 	if err != nil {
 		return // ignore error, sync on dir must not be necessarily supported by the FS
 	}
 	defer f.Close()
 	syncFile(f)
-}
-
-func updateActiveMarker(log *logp.Logger, home, active string) error {
-	activeLink := filepath.Join(home, "active.dat")
-	tmpLink := filepath.Join(home, "active.dat")
-	log = log.With("temporary", tmpLink, "data_file", active, "link_file", activeLink)
-
-	if active == "" {
-		if err := os.Remove(activeLink); err != nil { // try, remove active symlink if present.
-			log.Errorf("Failed to remove old pointer file: %v", err)
-		}
-		return nil
-	}
-
-	// Atomically try to update the pointer file to the most recent data file.
-	// We 'simulate' the atomic update by create the temporary active.json.tmp symlink file,
-	// which we rename to active.json. If active.json.tmp exists we remove it.
-	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
-		log.Errorf("Failed to remove old temporary symlink file: %v", err)
-		return err
-	}
-	if err := ioutil.WriteFile(tmpLink, []byte(active), 0600); err != nil {
-		log.Errorf("Failed to write temporary pointer file: %v", err)
-		return err
-	}
-	if err := os.Rename(tmpLink, activeLink); err != nil {
-		log.Errorf("Failed to replace link file: %v", err)
-		return err
-	}
-
-	trySyncPath(home)
-	return nil
 }

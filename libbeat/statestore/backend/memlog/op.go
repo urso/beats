@@ -24,11 +24,13 @@ type (
 		name() string
 	}
 
+	// opSet encodes the 'Set' operations in the update log.
 	opSet struct {
 		K string
 		V common.MapStr
 	}
 
+	// opRemove encodes the 'Remove' operation in the update log.
 	opRemove struct {
 		K string
 	}

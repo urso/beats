@@ -19,6 +19,8 @@ package memlog
 
 import "os"
 
+// syncFile implements the fsync operation for Windows. Internally
+// FlushFileBuffers will be used.
 func syncFile(f *os.File) error {
 	return f.Sync() // stdlib already uses FlushFileBuffes, yay
 }

@@ -25,6 +25,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// syncFile implements the fsync operation for most *nix systems.
+// The call is retried if EINTR or EAGAIN is returned.
 func syncFile(f *os.File) error {
 	// best effort
 	for {
