@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/elastic/beats/v7/libbeat/logp"
+	"github.com/elastic/go-concert/timed"
 	"github.com/elastic/go-concert/unison"
 )
 
@@ -41,74 +42,68 @@ type cleaner struct {
 // for a long time, and the life time has been exhausted, then the resource will be removed immediately
 // once the last event has been ACKed.
 func (c *cleaner) run(canceler unison.Canceler, store *store, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	started := time.Now()
-
-	for {
-		select {
-		case <-ticker.C:
-			c.cleanup(started, store)
-		case <-canceler.Done():
-			return
-		}
-	}
+	timed.Periodic(canceler, interval, func() {
+		gcStore(c.log, started, store)
+	})
 }
 
-// Cleanup looks for resources to remove and deletes these. `cleanup` receives
+// gcStore looks for resources to remove and deletes these. `gcStore` receives
 // the start timestamp of the cleaner as reference. If we have entries without
 // updates in the registry, that are older than `started`, we will use `started
 // + ttl` to decide if an entry will be removed. This way old entries are not
 // removed immediately on startup if the Beat is down for a longer period of
 // time.
-func (c *cleaner) cleanup(started time.Time, store *store) {
-	c.log.Debugf("Start store cleanup")
-	defer c.log.Debugf("Done store cleanup")
+func gcStore(log *logp.Logger, started time.Time, store *store) {
+	log.Debugf("Start store cleanup")
+	defer log.Debugf("Done store cleanup")
 
 	states := store.ephemeralStore
 	states.mu.Lock()
 	defer states.mu.Unlock()
 
-	now := time.Now()
+	keys := gcFind(states.table, started, time.Now())
+	if len(keys) == 0 {
+		log.Debug("No entries to remove found")
+		return
+	}
 
-	// keys stores all resource keys to delete. The bool indicates if the key was
-	// already written to the registry file, or if the resource is still in
-	// memory only (e.g. due to IO errors).
+	if err := gcClean(store, keys); err != nil {
+		log.Errorf("Failed to remove all entries from the registry: %+v", err)
+	}
+}
+
+// gcFind searches the store of resources that can be removed. A set of keys to delete is returned.
+func gcFind(table map[string]*resource, started, now time.Time) map[string]struct{} {
 	keys := map[string]struct{}{}
-	numStored := 0
-
-	for key, resource := range states.table {
+	for key, resource := range table {
 		clean := checkCleanResource(started, now, resource)
 		if !clean {
 			// do not clean the resource if it is still live or not serialized to the persistent store yet.
 			continue
 		}
 		keys[key] = struct{}{}
-		numStored++
 	}
 
-	if len(keys) == 0 {
-		c.log.Debug("No entries to remove found")
-		return
-	}
-
-	// try to delete entries from the registry and internal state storage
-	if numStored > 0 {
-		for k := range keys {
-			err := store.persistentStore.Remove(string(k))
-			if err != nil {
-				c.log.Errorf("Failed to remove entries from the registry: %+v", err)
-				return
-			}
-		}
-	}
-
-	for key := range keys {
-		delete(states.table, key)
-	}
+	return keys
 }
 
+// gcClean removes key value pairs in the removeSet from the store.
+// If deletion in the persistent store fails the entry is kept in memory and
+// eventually cleaned up later.
+func gcClean(store *store, removeSet map[string]struct{}) error {
+	for key := range removeSet {
+		if err := store.persistentStore.Remove(key); err != nil {
+			return err
+		}
+		delete(store.ephemeralStore.table, key)
+	}
+	return nil
+}
+
+// checkCleanResource returns true for a key-value pair is assumed to be old,
+// if is not in use and there are no more pending updates that still need to be
+// written to the persistent store anymore.
 func checkCleanResource(started, now time.Time, resource *resource) bool {
 	if !resource.Finished() {
 		return false
