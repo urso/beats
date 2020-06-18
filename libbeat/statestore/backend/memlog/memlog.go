@@ -62,7 +62,7 @@ type CheckpointPredicate func(fileSize uint64) bool
 
 const defaultFileMode os.FileMode = 0600
 
-const defaultBufferSize = 4096
+const defaultBufferSize = 4 * 1024
 
 func defaultCheckpoint(filesize uint64) bool {
 	const limit = 10 * 1 << 20 // set rotation limit to 10MB by default
