@@ -87,8 +87,7 @@ type resource struct {
 type (
 	// state represents the full document as it is stored in the registry.
 	//
-	// The `Internal` namespace contains fields that are used by the input manager
-	// for internal management tasks that are required to be persisted between restarts.
+	// The TTL and Update fields are for internal use only.
 	//
 	// The `Cursor` namespace is used to store the cursor information that are
 	// required to continue processing from the last known position. Cursor
@@ -106,27 +105,10 @@ type (
 		TTL     time.Duration
 		Updated time.Time
 	}
-
-	stateInternalTTL     struct{ TTL time.Duration }
-	stateInternalUpdated struct{ Updated time.Time }
-
-	// registryStateUpdate is used to only transfer/update fields in the registry
-	// that need to be updated when the pending update operations is finally
-	// serialized.  Meta data that identify the cursor (like the key) must not be
-	// updated via the ACK handling.
-	registryStateUpdateCursor struct {
-		Internal stateInternalUpdated
-		Cursor   interface{}
-	}
-
-	registryStateUpdateInternal struct {
-		Internal stateInternal
-	}
-
-	registryStateInsert struct {
-		Internal stateInternalTTL
-	}
 )
+
+// hook into store close for testing purposes
+var closeStore = (*store).close
 
 func openStore(log *logp.Logger, statestore StateStore, prefix string) (*store, error) {
 	ok := false
@@ -153,7 +135,7 @@ func openStore(log *logp.Logger, statestore StateStore, prefix string) (*store, 
 func (s *store) Retain() { s.refCount.Retain() }
 func (s *store) Release() {
 	if s.refCount.Release() {
-		s.close()
+		closeStore(s)
 	}
 }
 
@@ -163,8 +145,11 @@ func (s *store) close() {
 	}
 }
 
-func (s *store) Find(key string, create bool) *resource {
-	return s.ephemeralStore.Find(key, create)
+// Get returns the resource for the key.
+// A new shared resource is generated if the key is not known. The generated
+// resource is not synced to disk yet.
+func (s *store) Get(key string) *resource {
+	return s.ephemeralStore.Find(key, true)
 }
 
 func (s *store) UpdateTTL(resource *resource, ttl time.Duration) {
@@ -254,6 +239,30 @@ func (r *resource) UnpackCursor(to interface{}) error {
 		return typeconv.Convert(to, r.cursor)
 	}
 	return typeconv.Convert(to, r.pendingCursor)
+}
+
+// syncStateSnapshot returns the current insync state based on already ACKed update operations.
+func (r *resource) inSyncStateSnapshot() state {
+	return state{
+		TTL:     r.internalState.TTL,
+		Updated: r.internalState.Updated,
+		Cursor:  r.cursor,
+	}
+}
+
+// stateSnapshot returns the current in memory state, that already contains state updates
+// not yet ACKed.
+func (r *resource) stateSnapshot() state {
+	cursor := r.pendingCursor
+	if r.activeCursorOperations == 0 {
+		cursor = r.cursor
+	}
+
+	return state{
+		TTL:     r.internalState.TTL,
+		Updated: r.internalState.Updated,
+		Cursor:  cursor,
+	}
 }
 
 func readStates(log *logp.Logger, store *statestore.Store, prefix string) (*states, error) {

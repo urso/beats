@@ -131,7 +131,7 @@ func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 func (cim *InputManager) lock(ctx input.Context, key string) (*resource, error) {
 	log := ctx.Logger
 
-	resource := cim.store.Find(key, true)
+	resource := cim.store.Get(key)
 	if !resource.lock.TryLock() {
 		log.Infof("Resource '%v' currently in use, waiting...", key)
 		err := resource.lock.LockContext(ctx.Cancelation)

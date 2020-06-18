@@ -111,11 +111,7 @@ func (op *updateOp) Execute(n uint) {
 		resource.internalState.Updated = op.timestamp
 	}
 
-	err := op.store.persistentStore.Set(resource.key, state{
-		TTL:     resource.internalState.TTL,
-		Updated: resource.internalState.Updated,
-		Cursor:  resource.cursor,
-	})
+	err := op.store.persistentStore.Set(resource.key, resource.inSyncStateSnapshot())
 	if err != nil {
 		if !statestore.IsClosed(err) {
 			op.store.log.Errorf("Failed to update state in the registry for '%v'", resource.key)
