@@ -18,7 +18,6 @@
 package winlog
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/go-concert/ctxtool"
+	"github.com/elastic/go-concert/timed"
 
 	"github.com/elastic/beats/v7/winlogbeat/checkpoint"
 	"github.com/elastic/beats/v7/winlogbeat/eventlog"
@@ -124,7 +124,7 @@ func (eventlogRunner) Run(
 		}
 
 		if len(records) == 0 {
-			wait(cancelCtx, time.Second)
+			timed.Wait(cancelCtx, time.Second)
 			continue
 		}
 
@@ -139,16 +139,6 @@ func (eventlogRunner) Run(
 	}
 
 	return nil
-}
-
-func wait(ctx context.Context, d time.Duration) {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
 }
 
 func initCheckpoint(log *logp.Logger, cursor cursor.Cursor) checkpoint.EventLogState {
