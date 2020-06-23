@@ -38,11 +38,6 @@ type Input interface {
 	Run(input.Context, Source, Cursor, Publisher) error
 }
 
-type Cursor struct {
-	store    *store
-	resource *resource
-}
-
 type managedInput struct {
 	manager      *InputManager
 	userID       string
@@ -133,7 +128,7 @@ func (inp *managedInput) runSource(
 	store.UpdateTTL(resource, inp.cleanTimeout)
 
 	// start the collection
-	cursor := Cursor{store: store, resource: resource}
+	cursor := makeCursor(store, resource)
 	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
 }
@@ -143,15 +138,6 @@ func (inp *managedInput) createSourceID(s Source) string {
 		return fmt.Sprintf("%v::%v::%v", inp.manager.Type, inp.userID, s.Name())
 	}
 	return fmt.Sprintf("%v::%v", inp.manager.Type, s.Name())
-}
-
-func (c Cursor) IsNew() bool { return c.resource.IsNew() }
-
-func (c Cursor) Unpack(to interface{}) error {
-	if c.IsNew() {
-		return nil
-	}
-	return c.resource.UnpackCursor(to)
 }
 
 func newInputACKHandler(log *logp.Logger) beat.ACKer {

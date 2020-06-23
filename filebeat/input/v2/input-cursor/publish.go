@@ -91,10 +91,14 @@ func createUpdateOp(store *store, resource *resource, updates interface{}) (*upd
 	}, nil
 }
 
+func (op *updateOp) done(n uint) {
+	op.resource.ReleaseN(n)
+	op.resource = nil
+}
+
 func (op *updateOp) Execute(n uint) {
 	resource := op.resource
-
-	defer resource.ReleaseN(n)
+	defer op.done(n)
 
 	resource.stateMutex.Lock()
 	defer resource.stateMutex.Unlock()

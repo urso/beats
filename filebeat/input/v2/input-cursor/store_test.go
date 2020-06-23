@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,6 +43,7 @@ func TestStore_OpenClose(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, nil))
 		defer store.Release()
 		require.Equal(t, 0, len(storeMemorySnapshot(store)))
+		require.Equal(t, 0, len(storeInSyncSnapshot(store)))
 	})
 
 	t.Run("already available state is loaded", func(t *testing.T) {
@@ -53,7 +55,8 @@ func TestStore_OpenClose(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, states))
 		defer store.Release()
 
-		require.Equal(t, states, storeMemorySnapshot(store))
+		checkEqualStoreState(t, states, storeMemorySnapshot(store))
+		checkEqualStoreState(t, states, storeInSyncSnapshot(store))
 	})
 
 	t.Run("ignore entries with wrong index on open", func(t *testing.T) {
@@ -68,7 +71,8 @@ func TestStore_OpenClose(t *testing.T) {
 		want := map[string]state{
 			"test::key0": state{Cursor: "1"},
 		}
-		require.Equal(t, want, storeMemorySnapshot(store))
+		checkEqualStoreState(t, want, storeMemorySnapshot(store))
+		checkEqualStoreState(t, want, storeInSyncSnapshot(store))
 	})
 }
 
@@ -119,6 +123,91 @@ func TestStore_Get(t *testing.T) {
 }
 
 func TestStore_UpdateTTL(t *testing.T) {
+	t.Run("add TTL for new entry to store", func(t *testing.T) {
+		// when creating a resource we set the TTL and insert a new key value pair without cursor value into the store:
+		store := testOpenStore(t, "test", createSampleStore(t, nil))
+		defer store.Release()
+
+		res := store.Get("test::key")
+		store.UpdateTTL(res, 60*time.Second)
+
+		want := map[string]state{
+			"test::key": state{
+				TTL:     60 * time.Second,
+				Updated: res.internalState.Updated,
+				Cursor:  nil,
+			},
+		}
+
+		checkEqualStoreState(t, want, storeMemorySnapshot(store))
+		checkEqualStoreState(t, want, storeInSyncSnapshot(store))
+	})
+
+	t.Run("update TTL for in-sync resource does not overwrite state", func(t *testing.T) {
+		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
+			"test::key": state{
+				TTL:    1 * time.Second,
+				Cursor: "test",
+			},
+		}))
+		defer store.Release()
+
+		res := store.Get("test::key")
+		store.UpdateTTL(res, 60*time.Second)
+		want := map[string]state{
+			"test::key": state{
+				Updated: res.internalState.Updated,
+				TTL:     60 * time.Second,
+				Cursor:  "test",
+			},
+		}
+
+		checkEqualStoreState(t, want, storeMemorySnapshot(store))
+		checkEqualStoreState(t, want, storeInSyncSnapshot(store))
+	})
+
+	t.Run("update TTL for resource with pending updates", func(t *testing.T) {
+		// This test updates the resource TTL while update operations are still
+		// pending, but not synced to the persistent store yet.
+		// UpdateTTL changes the state in the persistent store immediately, and must therefore
+		// serialize the old in-sync state with update meta-data.
+
+		// create store
+		backend := createSampleStore(t, map[string]state{
+			"test::key": state{
+				TTL:    1 * time.Second,
+				Cursor: "test",
+			},
+		})
+		store := testOpenStore(t, "test", backend)
+		defer store.Release()
+
+		// create pending update operation
+		res := store.Get("test::key")
+		op, err := createUpdateOp(store, res, "test-state-update")
+		require.NoError(t, err)
+		defer op.done(1)
+
+		// Update key/value pair TTL. This will update the internal state in the
+		// persistent store only, not modifying the old cursor state yet.
+		store.UpdateTTL(res, 60*time.Second)
+
+		// validate
+		wantMemoryState := state{
+			Updated: res.internalState.Updated,
+			TTL:     60 * time.Second,
+			Cursor:  "test-state-update",
+		}
+		wantInSyncState := state{
+			Updated: res.internalState.Updated,
+			TTL:     60 * time.Second,
+			Cursor:  "test",
+		}
+
+		checkEqualStoreState(t, map[string]state{"test::key": wantMemoryState}, storeMemorySnapshot(store))
+		checkEqualStoreState(t, map[string]state{"test::key": wantInSyncState}, storeInSyncSnapshot(store))
+		checkEqualStoreState(t, map[string]state{"test::key": wantInSyncState}, backend.snapshot())
+	})
 }
 
 func closeStoreWith(fn func(s *store)) func() {
@@ -168,6 +257,7 @@ func (ts testStateStore) Access() (*statestore.Store, error) {
 	return ts.Store, nil
 }
 
+// snapshot copies all key/value pairs from the persistent store into a table for inspection.
 func (ts testStateStore) snapshot() map[string]state {
 	states := map[string]state{}
 	err := ts.Store.Each(func(key string, dec statestore.ValueDecoder) (bool, error) {
@@ -185,6 +275,12 @@ func (ts testStateStore) snapshot() map[string]state {
 	return states
 }
 
+// storeMemorySnapshot copies all key/value pairs into a table for inspection.
+// The state returned reflects the in memory state, which can be ahead of the
+// persistent state.
+//
+// Note: The state returned by storeMemorySnapshot is always ahead of the state returned by storeInSyncSnapshot.
+//       All key value pairs are fully in-sync, if both snapshot functions return the same state.
 func storeMemorySnapshot(store *store) map[string]state {
 	store.ephemeralStore.mu.Lock()
 	defer store.ephemeralStore.mu.Unlock()
@@ -196,6 +292,12 @@ func storeMemorySnapshot(store *store) map[string]state {
 	return states
 }
 
+// storeInSyncSnapshot copies all key/value pairs into the table for inspection.
+// The state returned reflects the current state that the in-memory tables assumed to be
+// written to the persistent store already.
+
+// Note: The state returned by storeMemorySnapshot is always ahead of the state returned by storeInSyncSnapshot.
+//       All key value pairs are fully in-sync, if both snapshot functions return the same state.
 func storeInSyncSnapshot(store *store) map[string]state {
 	store.ephemeralStore.mu.Lock()
 	defer store.ephemeralStore.mu.Unlock()
@@ -205,4 +307,28 @@ func storeInSyncSnapshot(store *store) map[string]state {
 		states[k] = res.inSyncStateSnapshot()
 	}
 	return states
+}
+
+// checkEqualStoreState compares 2 store snapshot tables for equality. The test
+// fails with Errorf if the state differ.
+//
+// Note: testify is too strict when comparing timestamp, better use checkEqualStoreState.
+func checkEqualStoreState(t *testing.T, want, got map[string]state) bool {
+	if d := cmp.Diff(want, got); d != "" {
+		t.Errorf("store state mismatch (-want +got):\n%s", d)
+		return false
+	}
+	return true
+}
+
+// requireEqualStoreState compares 2 store snapshot tables for equality. The test
+// fails with Fatalf if the state differ.
+//
+// Note: testify is too strict when comparing timestamp, better use checkEqualStoreState.
+func requireEqualStoreState(t *testing.T, want, got map[string]state) bool {
+	if d := cmp.Diff(want, got); d != "" {
+		t.Fatalf("store state mismatch (-want +got):\n%s", d)
+		return false
+	}
+	return true
 }
