@@ -224,14 +224,6 @@ func (r *resource) ReleaseN(n uint) {
 // that still need to be written to the registry.
 func (r *resource) Finished() bool { return r.pending.Load() == 0 }
 
-// Unlock removes the exclusive access to the resource and gives up ownership.
-// The input must not use the resource anymore after 'unlock' Only pending update operations
-// will continue to excert ownership.
-func (r *resource) Unlock() {
-	r.lock.Unlock()
-	r.Release()
-}
-
 func (r *resource) UnpackCursor(to interface{}) error {
 	r.stateMutex.Lock()
 	defer r.stateMutex.Unlock()

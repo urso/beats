@@ -122,7 +122,8 @@ func (inp *managedInput) runSource(
 	if err != nil {
 		return err
 	}
-	defer resource.Unlock()
+	defer resource.Release()
+	defer resource.lock.Unlock()
 
 	// Ensure we use the correct TTL by updating it now. If the resource is 'new' we will insert it into the registry now.
 	store.UpdateTTL(resource, inp.cleanTimeout)
