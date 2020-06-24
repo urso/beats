@@ -271,6 +271,17 @@ func TestManager_InputsTest(t *testing.T) {
 }
 
 func TestManager_InputsRun(t *testing.T) {
+	t.Run("input returned with error", func(t *testing.T) {
+	})
+
+	t.Run("inputs are executed concurrently", func(t *testing.T) {
+	})
+
+	t.Run("shutdown on signal", func(t *testing.T) {
+	})
+
+	t.Run("event ACK triggers execution of update operations", func(t *testing.T) {
+	})
 }
 
 func TestLockResource(t *testing.T) {
