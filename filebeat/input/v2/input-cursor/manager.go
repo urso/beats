@@ -32,16 +32,43 @@ import (
 	"github.com/elastic/go-concert/unison"
 )
 
+// InputManager is used to create, manage, and coordinate stateful inputs and
+// their persistent state.
+// The InputManager ensures that only one input can be active for a unique source.
+// If two inputs have overlapping sources, both can still collect data, but
+// only one input will collect from the common source.
+//
+// The InputManager automatically cleans up old entries without an active
+// input, and without any pending update operations for the persistent store.
+//
+// The Type field is used to create the key name in the persistent store. Users
+// are allowed to add a custome per input configuration ID using the `id`
+// setting, to collect the same source multiple times, but with different
+// state. The key name in the persistent store becomes <Type>-[<ID>]-<Source Name>
 type InputManager struct {
-	Logger              *logp.Logger
-	StateStore          StateStore
-	Type                string
+	Logger *logp.Logger
+
+	// StateStore gives the InputManager access to the persitent key value store.
+	StateStore StateStore
+
+	// Type must contain the name of the input type. It is used to create the key name
+	// for all sources the inputs collect from.
+	Type string
+
+	// DefaultCleanTimeout configures the key/value garbage collection interval.
+	// The InputManager will only collect keys for the configured 'Type'
 	DefaultCleanTimeout time.Duration
-	Configure           func(cfg *common.Config) ([]Source, Input, error)
+
+	// Configure returns an array of Sources, and a configured Input instances
+	// that will be used to collect events from each source.
+	Configure func(cfg *common.Config) ([]Source, Input, error)
 
 	store *store
 }
 
+// Source describe a source the input can collect data from.
+// The `Name` method must return an unique name, that will be used to identify
+// the source in the persistent state store.
 type Source interface {
 	Name() string
 }
@@ -49,6 +76,7 @@ type Source interface {
 var errNoSourceConfigured = errors.New("no source has been configured")
 var errNoInputRunner = errors.New("no input runner available")
 
+// StateStore interface and configurations used to give the Manager access to the persistent store.
 type StateStore interface {
 	Access() (*statestore.Store, error)
 	CleanupInterval() time.Duration
@@ -70,6 +98,8 @@ func (cim *InputManager) init() error {
 	return nil
 }
 
+// Init starts background processes for deleting old entries from the
+// persistent store if mode is ModeRun.
 func (cim *InputManager) Init(group unison.Group, mode v2.Mode) error {
 	if mode != v2.ModeRun {
 		return nil
@@ -107,6 +137,8 @@ func (cim *InputManager) shutdown() {
 	cim.store.Release()
 }
 
+// Create builds a new v2.Input using the provided Configure function.
+// The Input will run a go-routine per source that has been configured.
 func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 	settings := struct {
 		ID           string        `config:"id"`

@@ -26,24 +26,44 @@ import (
 	"github.com/elastic/beats/v7/libbeat/statestore"
 )
 
+// Publisher is used to publish an event and update the cursor in a single call to Publish.
+// Inputs are allowed to pass `nil` as cursor state. In this case the state is not updated, but the
+// event will still be published as is.
 type Publisher interface {
 	Publish(event beat.Event, cursor interface{}) error
 }
 
+// cursorPublisher implements the Publisher interface and used internally by the managedInput.
+// When publishing an event with cursor state updates, the cursorPublisher
+// updates the in memory state and create an updateOp that is used to schedule
+// an update for the persistent store. The updateOp is run by the inputs ACK
+// handler, persisting the pending update.
 type cursorPublisher struct {
 	canceler input.Canceler
 	client   beat.Client
 	cursor   *Cursor
 }
 
+// updateOp keeps track of pending updates that are not written to the persistent store yet.
+// Update operations are ordered. The input manager guarantees that only one
+// input can create update operation for a source, such that new input
+// instances can add update operations to be executed after already pending
+// update operations from older inputs instances that have been shutdown.
 type updateOp struct {
-	store     *store
-	resource  *resource
+	store    *store
+	resource *resource
+
+	// state updates to persist
 	timestamp time.Time
 	ttl       time.Duration
 	delta     interface{}
 }
 
+// Publish publishes an event. Publish returns false if the inputs cancellation context has been marked as done.
+// If cursorUpdate is not nil, Publish updates the in memory state and create and updateOp for the pending update.
+// It overwrite event.Private with the update operation, before finally sending the event.
+// The ACK ordering in the publisher pipeline guarantees that update operations
+// will be ACKed and executed in the correct order.
 func (c *cursorPublisher) Publish(event beat.Event, cursorUpdate interface{}) error {
 	if cursorUpdate == nil {
 		return c.forward(event)
@@ -94,12 +114,14 @@ func createUpdateOp(store *store, resource *resource, updates interface{}) (*upd
 	}, nil
 }
 
+// done releases resources held by the last N updateOps.
 func (op *updateOp) done(n uint) {
-	op.resource.ReleaseN(n)
+	op.resource.UpdatesReleaseN(n)
 	op.resource = nil
 	*op = updateOp{}
 }
 
+// Execute updates the persistent store with the scheduled changes and releases the resource.
 func (op *updateOp) Execute(n uint) {
 	resource := op.resource
 	defer op.done(n)

@@ -53,6 +53,15 @@ type states struct {
 	table map[string]*resource
 }
 
+// resource holds the in memory state and keeps track of pending updates and inputs collecting
+// event for the resource its key.
+// A resource is assumed active for as long as at least one input has (or tries
+// to) acuired the lock, and as long as there are pending updateOp instances in
+// the pipeline not ACKed yet. The key can not gc'ed by the cleaner, as long as the resource is active.
+//
+// State chagnes and writes to the persistent store are protected using the
+// stateMutex, to ensure full consistency between direct writes and updates
+// after ACK.
 type resource struct {
 	// pending counts the number of Inputs and outstanding registry updates.
 	// as long as pending is > 0 the resource is in used and must not be garbage collected.
@@ -80,8 +89,16 @@ type resource struct {
 
 	activeCursorOperations uint
 	internalState          stateInternal
-	cursor                 interface{}
-	pendingCursor          interface{}
+
+	// cursor states. The cursor holds the state as it is currently known to the
+	// persistent store, while pendingCursor contains the most recent update
+	// (in-memory state), that still needs to be synced to the persistent store.
+	// The pendingCursor is nil if there are no pending updates.
+	// When processing update operations on ACKs, the state is applied to cursor
+	// first, which is finally written to the persistent store. This ensures that
+	// we always write the complete state of the key/value pair.
+	cursor        interface{}
+	pendingCursor interface{}
 }
 
 type (
@@ -152,6 +169,10 @@ func (s *store) Get(key string) *resource {
 	return s.ephemeralStore.Find(key, true)
 }
 
+// UpdateTTL updates the time-to-live of a resource. Inactive resources with expired TTL are subject to removal.
+// The TTL value is part of the internal state, and will be written immediately to the persistent store.
+// On update the resource its `cursor` state is used, to keep the cursor state in sync with the current known
+// on disk store state.
 func (s *store) UpdateTTL(resource *resource, ttl time.Duration) {
 	resource.stateMutex.Lock()
 	defer resource.stateMutex.Unlock()
@@ -178,6 +199,8 @@ func (s *store) UpdateTTL(resource *resource, ttl time.Duration) {
 	}
 }
 
+// Find returns the resource for a given key. If the key is unknown and create is set to false nil will be returned.
+// The resource returned by Find is marked as active. (*resource).Release must be called to mark the resource as inactive again.
 func (s *states) Find(key string, create bool) *resource {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,6 +225,7 @@ func (s *states) Find(key string, create bool) *resource {
 	return resource
 }
 
+// IsNew returns true if we have no state recorded for the current resource.
 func (r *resource) IsNew() bool {
 	r.stateMutex.Lock()
 	defer r.stateMutex.Unlock()
@@ -216,7 +240,8 @@ func (r *resource) Retain() { r.pending.Inc() }
 // Release reduced the owner ship counter of the resource.
 func (r *resource) Release() { r.pending.Dec() }
 
-func (r *resource) ReleaseN(n uint) {
+// UpdatesReleaseN is used to release ownership of N pending update operations.
+func (r *resource) UpdatesReleaseN(n uint) {
 	r.pending.Sub(uint64(n))
 }
 
@@ -224,6 +249,7 @@ func (r *resource) ReleaseN(n uint) {
 // that still need to be written to the registry.
 func (r *resource) Finished() bool { return r.pending.Load() == 0 }
 
+// UnpackCursor deserializes the in memory state.
 func (r *resource) UnpackCursor(to interface{}) error {
 	r.stateMutex.Lock()
 	defer r.stateMutex.Unlock()

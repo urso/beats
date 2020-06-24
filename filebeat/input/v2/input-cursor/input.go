@@ -32,12 +32,30 @@ import (
 	"github.com/urso/sderr"
 )
 
+// Input interface for cursor based inputs. This interface must be implemented
+// by inputs that with to use the InputManager in order to implement a stateful
+// input that can store state between restarts.
 type Input interface {
 	Name() string
+
+	// Test checks the configuaration and runs additional checks if the Input can
+	// actually collect data for the given configuration (e.g. check if host/port or files are
+	// accessible).
+	// The input manager will call Test per configured source.
 	Test(Source, input.TestContext) error
+
+	// Run starts the data collection. Run must return an error only if the
+	// error is fatal making it impossible for the input to recover.
+	// The input run a go-routine can call Run per configured Source.
 	Run(input.Context, Source, Cursor, Publisher) error
 }
 
+// managedInput implements the v2.Input interface, integrating cursor Inputs
+// with the v2 input API.
+// The managedInput starts go-routines per configured source.
+// If a Run returns the error is 'remembered', but active data collecting
+// continues. Only after all Run calls have returned will the managedInput be
+// done.
 type managedInput struct {
 	manager      *InputManager
 	userID       string
@@ -46,8 +64,10 @@ type managedInput struct {
 	cleanTimeout time.Duration
 }
 
+// Name is required to implement the v2.Input interface
 func (inp *managedInput) Name() string { return inp.input.Name() }
 
+// Test runs the Test method for each configured source.
 func (inp *managedInput) Test(ctx input.TestContext) error {
 	var grp unison.MultiErrGroup
 	for _, source := range inp.sources {
@@ -62,6 +82,10 @@ func (inp *managedInput) Test(ctx input.TestContext) error {
 	return nil
 }
 
+// Run creates a go-routine per source, waiting until all go-routines have
+// returned, either by error, or by shutdown signal.
+// If an input panics, we create an error value with stack trace to report the
+// issue, but not crash the whole process.
 func (inp *managedInput) Run(
 	ctx input.Context,
 	pipeline beat.PipelineConnector,
