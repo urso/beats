@@ -27,7 +27,7 @@ func TestGCStore(t *testing.T) {
 		const ttl = 60 * time.Second
 
 		initState := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     ttl,
 				Updated: started.Add(-ttl / 2),
 			},
@@ -47,7 +47,7 @@ func TestGCStore(t *testing.T) {
 		started := time.Now().Add(-5 * ttl) // cleanup process is running for a while already
 
 		initState := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     ttl,
 				Updated: started.Add(-ttl),
 			},
@@ -68,7 +68,7 @@ func TestGCStore(t *testing.T) {
 		started := time.Now()
 
 		initState := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     ttl,
 				Updated: started.Add(-2 * ttl),
 			},
@@ -88,7 +88,7 @@ func TestGCStore(t *testing.T) {
 		started := time.Now().Add(-5 * ttl) // cleanup process is running for a while already
 
 		initState := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     ttl,
 				Updated: started.Add(-ttl),
 			},
@@ -115,7 +115,7 @@ func TestGCStore(t *testing.T) {
 		started := time.Now().Add(-5 * ttl) // cleanup process is running for a while already
 
 		initState := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     ttl,
 				Updated: started.Add(-ttl),
 			},

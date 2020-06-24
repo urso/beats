@@ -54,8 +54,10 @@ func (inp *managedInput) Test(ctx input.TestContext) error {
 		source := source
 		grp.Go(func() error { return inp.input.Test(source, ctx) })
 	}
-	if errs := grp.Wait(); len(errs) > 0 {
-		sderr.WrapAll(errs, "input tests failed")
+
+	errs := grp.Wait()
+	if len(errs) > 0 {
+		return sderr.WrapAll(errs, "input tests failed")
 	}
 	return nil
 }
@@ -87,7 +89,7 @@ func (inp *managedInput) Run(
 	}
 
 	if errs := grp.Wait(); len(errs) > 0 {
-		sderr.WrapAll(errs, "input %v failed", ctx.ID)
+		return sderr.WrapAll(errs, "input %v failed", ctx.ID)
 	}
 	return nil
 }
@@ -122,8 +124,7 @@ func (inp *managedInput) runSource(
 	if err != nil {
 		return err
 	}
-	defer resource.Release()
-	defer resource.lock.Unlock()
+	defer releaseResource(resource)
 
 	// Ensure we use the correct TTL by updating it now. If the resource is 'new' we will insert it into the registry now.
 	store.UpdateTTL(resource, inp.cleanTimeout)

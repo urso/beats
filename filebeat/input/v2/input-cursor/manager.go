@@ -18,6 +18,7 @@
 package cursor
 
 import (
+	"errors"
 	"time"
 
 	"github.com/urso/sderr"
@@ -44,6 +45,9 @@ type InputManager struct {
 type Source interface {
 	Name() string
 }
+
+var errNoSourceConfigured = errors.New("no source has been configured")
+var errNoInputRunner = errors.New("no input runner available")
 
 type StateStore interface {
 	Access() (*statestore.Store, error)
@@ -116,6 +120,12 @@ func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(sources) == 0 {
+		return nil, errNoSourceConfigured
+	}
+	if inp == nil {
+		return nil, errNoInputRunner
+	}
 
 	return &managedInput{
 		manager:      cim,
@@ -129,16 +139,28 @@ func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
 // Lock locks a key for exclusive access and returns an resource that can be used to modify
 // the cursor state and unlock the key.
 func (cim *InputManager) lock(ctx input.Context, key string) (*resource, error) {
-	log := ctx.Logger
-
 	resource := cim.store.Get(key)
-	if !resource.lock.TryLock() {
-		log.Infof("Resource '%v' currently in use, waiting...", key)
-		err := resource.lock.LockContext(ctx.Cancelation)
-		if err != nil {
-			log.Infof("Input for resource '%v' has been stopped while waiting", key)
-			return nil, err
-		}
+	err := lockResource(ctx.Logger, resource, ctx.Cancelation)
+	if err != nil {
+		resource.Release()
+		return nil, err
 	}
 	return resource, nil
+}
+
+func lockResource(log *logp.Logger, resource *resource, canceler input.Canceler) error {
+	if !resource.lock.TryLock() {
+		log.Infof("Resource '%v' currently in use, waiting...", resource.key)
+		err := resource.lock.LockContext(canceler)
+		if err != nil {
+			log.Infof("Input for resource '%v' has been stopped while waiting", resource.key)
+			return err
+		}
+	}
+	return nil
+}
+
+func releaseResource(resource *resource) {
+	resource.lock.Unlock()
+	resource.Release()
 }

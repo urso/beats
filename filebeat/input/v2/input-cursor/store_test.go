@@ -48,8 +48,8 @@ func TestStore_OpenClose(t *testing.T) {
 
 	t.Run("already available state is loaded", func(t *testing.T) {
 		states := map[string]state{
-			"test::key0": state{Cursor: "1"},
-			"test::key1": state{Cursor: "2"},
+			"test::key0": {Cursor: "1"},
+			"test::key1": {Cursor: "2"},
 		}
 
 		store := testOpenStore(t, "test", createSampleStore(t, states))
@@ -61,15 +61,15 @@ func TestStore_OpenClose(t *testing.T) {
 
 	t.Run("ignore entries with wrong index on open", func(t *testing.T) {
 		states := map[string]state{
-			"test::key0": state{Cursor: "1"},
-			"other::key": state{Cursor: "2"},
+			"test::key0": {Cursor: "1"},
+			"other::key": {Cursor: "2"},
 		}
 
 		store := testOpenStore(t, "test", createSampleStore(t, states))
 		defer store.Release()
 
 		want := map[string]state{
-			"test::key0": state{Cursor: "1"},
+			"test::key0": {Cursor: "1"},
 		}
 		checkEqualStoreState(t, want, storeMemorySnapshot(store))
 		checkEqualStoreState(t, want, storeInSyncSnapshot(store))
@@ -132,7 +132,7 @@ func TestStore_UpdateTTL(t *testing.T) {
 		store.UpdateTTL(res, 60*time.Second)
 
 		want := map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:     60 * time.Second,
 				Updated: res.internalState.Updated,
 				Cursor:  nil,
@@ -145,7 +145,7 @@ func TestStore_UpdateTTL(t *testing.T) {
 
 	t.Run("update TTL for in-sync resource does not overwrite state", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:    1 * time.Second,
 				Cursor: "test",
 			},
@@ -155,7 +155,7 @@ func TestStore_UpdateTTL(t *testing.T) {
 		res := store.Get("test::key")
 		store.UpdateTTL(res, 60*time.Second)
 		want := map[string]state{
-			"test::key": state{
+			"test::key": {
 				Updated: res.internalState.Updated,
 				TTL:     60 * time.Second,
 				Cursor:  "test",
@@ -174,7 +174,7 @@ func TestStore_UpdateTTL(t *testing.T) {
 
 		// create store
 		backend := createSampleStore(t, map[string]state{
-			"test::key": state{
+			"test::key": {
 				TTL:    1 * time.Second,
 				Cursor: "test",
 			},
