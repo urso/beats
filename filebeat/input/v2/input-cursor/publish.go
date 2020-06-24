@@ -31,9 +31,9 @@ type Publisher interface {
 }
 
 type cursorPublisher struct {
-	ctx    *input.Context
-	client beat.Client
-	cursor *Cursor
+	canceler input.Canceler
+	client   beat.Client
+	cursor   *Cursor
 }
 
 type updateOp struct {
@@ -60,7 +60,10 @@ func (c *cursorPublisher) Publish(event beat.Event, cursorUpdate interface{}) er
 
 func (c *cursorPublisher) forward(event beat.Event) error {
 	c.client.Publish(event)
-	return c.ctx.Cancelation.Err()
+	if c.canceler == nil {
+		return nil
+	}
+	return c.canceler.Err()
 }
 
 func createUpdateOp(store *store, resource *resource, updates interface{}) (*updateOp, error) {
@@ -94,6 +97,7 @@ func createUpdateOp(store *store, resource *resource, updates interface{}) (*upd
 func (op *updateOp) done(n uint) {
 	op.resource.ReleaseN(n)
 	op.resource = nil
+	*op = updateOp{}
 }
 
 func (op *updateOp) Execute(n uint) {
@@ -124,6 +128,4 @@ func (op *updateOp) Execute(n uint) {
 		resource.internalInSync = true
 		resource.stored = true
 	}
-
-	*op = updateOp{}
 }

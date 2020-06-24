@@ -17,7 +17,7 @@ func TestCursor_IsNew(t *testing.T) {
 
 	t.Run("true if key is in store but without cursor value", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: nil},
+			"test::key": {Cursor: nil},
 		}))
 		defer store.Release()
 
@@ -27,7 +27,7 @@ func TestCursor_IsNew(t *testing.T) {
 
 	t.Run("false if key with cursor value is in persistent store", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: "test"},
+			"test::key": {Cursor: "test"},
 		}))
 		defer store.Release()
 
@@ -37,7 +37,7 @@ func TestCursor_IsNew(t *testing.T) {
 
 	t.Run("false if key with cursor value is in memory store only", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: nil},
+			"test::key": {Cursor: nil},
 		}))
 		defer store.Release()
 
@@ -65,7 +65,7 @@ func TestCursor_Unpack(t *testing.T) {
 
 	t.Run("unpack fails if types are not compatible", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: "test"},
+			"test::key": {Cursor: "test"},
 		}))
 		defer store.Release()
 
@@ -76,7 +76,7 @@ func TestCursor_Unpack(t *testing.T) {
 
 	t.Run("unpack from state in persistent store", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: "test"},
+			"test::key": {Cursor: "test"},
 		}))
 		defer store.Release()
 
@@ -89,7 +89,7 @@ func TestCursor_Unpack(t *testing.T) {
 
 	t.Run("unpack from in memory state if updates are pending", func(t *testing.T) {
 		store := testOpenStore(t, "test", createSampleStore(t, map[string]state{
-			"test::key": state{Cursor: "test"},
+			"test::key": {Cursor: "test"},
 		}))
 		defer store.Release()
 

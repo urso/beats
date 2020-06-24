@@ -130,7 +130,7 @@ func (inp *managedInput) runSource(
 
 	// start the collection
 	cursor := makeCursor(store, resource)
-	publisher := &cursorPublisher{ctx: &ctx, client: client, cursor: &cursor}
+	publisher := &cursorPublisher{canceler: ctx.Cancelation, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
 }
 
