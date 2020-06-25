@@ -31,12 +31,19 @@ import (
 	"github.com/elastic/go-concert"
 )
 
+// factory implements the cfgfile.RunnerFactory interface and wraps the
+// v2.Loader to create cfgfile.Runner instances based on available v2 inputs.
 type factory struct {
 	log    *logp.Logger
 	info   beat.Info
 	loader *v2.Loader
 }
 
+// runner wraps a v2.Input, starting a go-routine
+// On start the runner spawns a go-routine that will call (v2.Input).Run with
+// the `sig` setup for shutdown signaling.
+// On stop the runner triggers the shutdown signal and waits until the input
+// has returned.
 type runner struct {
 	log       *logp.Logger
 	agent     *beat.Info
@@ -47,7 +54,8 @@ type runner struct {
 }
 
 // RunnerFactory creates a cfgfile.RunnerFactory from an input Loader that is
-// compatible with cfgfile runners, autodiscovery, and filebeat modules.
+// compatible with config file based input reloading, autodiscovery, and filebeat modules.
+// The RunnerFactory is can be used to integrate v2 inputs into existing Beats.
 func RunnerFactory(
 	log *logp.Logger,
 	info beat.Info,

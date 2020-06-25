@@ -24,6 +24,9 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common"
 )
 
+// composeFactory combines to factories. Instances are created using the Combine function.
+// For each operation the configured factory will be tried first. If the
+// operation failed (for example the input type is unknown) the fallback factory is tried.
 type composeFactory struct {
 	factory  cfgfile.RunnerFactory
 	fallback cfgfile.RunnerFactory
