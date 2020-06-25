@@ -61,8 +61,8 @@ func TestCombine_CheckConfig(t *testing.T) {
 			fallback: failingRunnerFactory(oops2),
 			want:     nil,
 		},
-		"ignore ErrUnknown and use check from fallback": {
-			factory:  failingRunnerFactory(v2.ErrUnknown),
+		"ignore ErrUnknownInput and use check from fallback": {
+			factory:  failingRunnerFactory(v2.ErrUnknownInput),
 			fallback: failingRunnerFactory(oops2),
 			want:     oops2,
 		},
@@ -121,7 +121,7 @@ func TestCombine_Create(t *testing.T) {
 			check:    wantRunner(runner1),
 		},
 		"runner exists in fallback only": {
-			factory:  failingRunnerFactory(v2.ErrUnknown),
+			factory:  failingRunnerFactory(v2.ErrUnknownInput),
 			fallback: constRunnerFactory(runner2),
 			check:    wantRunner(runner2),
 		},
@@ -136,7 +136,7 @@ func TestCombine_Create(t *testing.T) {
 			check:    wantError(oops1),
 		},
 		"ignore ErrUnknown": {
-			factory:  failingRunnerFactory(v2.ErrUnknown),
+			factory:  failingRunnerFactory(v2.ErrUnknownInput),
 			fallback: failingRunnerFactory(oops2),
 			check:    wantError(oops2),
 		},
