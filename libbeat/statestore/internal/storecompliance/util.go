@@ -49,6 +49,13 @@ func WithPath(factory BackendFactory, fn func(*testing.T, *Registry)) func(t *te
 	}
 }
 
+// SetupRegistry creates a testing Registry for the current testing.T context.
+// A cleanup function that must be run via defer is returned as well.
+//
+// Exanple:
+//   reg, cleanup := SetupRegistry(t, factory)
+//   defer cleanup()
+//   ...
 func SetupRegistry(t testing.TB, factory BackendFactory) (*Registry, func()) {
 	path, err := ioutil.TempDir(defaultTempDir, "")
 	if err != nil {
@@ -99,6 +106,13 @@ func WithStore(factory BackendFactory, fn func(*testing.T, *Store)) func(*testin
 	}
 }
 
+// SetupTestStore creates a testing Store for the current testing.T context.
+// A cleanup function that must be run via defer is returned as well.
+//
+// Exanple:
+//   store, cleanup := SetupStore(t, factory)
+//   defer cleanup()
+//   ...
 func SetupTestStore(t testing.TB, factory BackendFactory) (*Store, func()) {
 	reg, cleanupReg := SetupRegistry(t, factory)
 	store, err := reg.Access("test")

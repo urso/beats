@@ -19,6 +19,13 @@
 // implementation must succeed in order to be compliant to the beats
 // statestore. The Internal tests are used by statestore/storetest and
 // statestore/backend/memlog.
+//
+// The package adds the `-keep` and `-dir <path>` CLI flags:
+//   - `-dir <path>`: configure path where to create test folders in (defaults
+//     to OS specific temporary directory)
+//   - `-keep`: The test directories will not be deleted after a test has
+//     finished. The test directory is added to the test logs.
+//
 package storecompliance
 
 import (
@@ -26,10 +33,14 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/elastic/beats/v7/libbeat/statestore/backend"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/elastic/beats/v7/libbeat/statestore/backend"
 )
 
+// BackendFactory is used by TestBackendCompliance to create
+// store instances for testing. Each store will be configured
+// with an unique temporary directory.
 type BackendFactory func(testPath string) (backend.Registry, error)
 
 var defaultTempDir string
@@ -40,6 +51,16 @@ func init() {
 	flag.BoolVar(&keepTmpDir, "keep", false, "Keep temporary test directories")
 }
 
+// TestBackendCompliance runs a set of tests the verifies that the store
+// implementation can be used by beats.
+// Most tests are executed twice if they modify data. Once with keeping the
+// store open between operations, and once with reopening the store between
+// updates.
+// For a store backend that supports different 'modes' that can impact storage,
+// the compliance tests should be run with the different modes enabled.
+//
+// Note: The tests only check for interoperability. Implementations should add
+// additional tests as well.
 func TestBackendCompliance(t *testing.T, factory BackendFactory) {
 	t.Run("init and close registry", WithPath(factory, func(t *testing.T, reg *Registry) {
 	}))
@@ -59,7 +80,7 @@ func TestBackendCompliance(t *testing.T, factory BackendFactory) {
 
 func testSetGet(t *testing.T, factory BackendFactory) {
 	t.Run("unknown key", WithStore(factory, func(t *testing.T, store *Store) {
-		has := store.MustHas("key")
+		has := store.MustHave("key")
 		assert.False(t, has)
 	}))
 
@@ -70,7 +91,7 @@ func testSetGet(t *testing.T, factory BackendFactory) {
 
 			store.ReopenIf(reopen)
 
-			has := store.MustHas("key")
+			has := store.MustHave("key")
 			assert.True(t, has)
 		}))
 
@@ -102,7 +123,7 @@ func testRemove(t *testing.T, factory BackendFactory) {
 			store.ReopenIf(reopen)
 			store.MustRemove(key)
 			store.ReopenIf(reopen)
-			has := store.MustHas(key)
+			has := store.MustHave(key)
 			assert.False(t, has)
 		}))
 	})
