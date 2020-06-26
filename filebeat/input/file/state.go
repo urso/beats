@@ -38,8 +38,8 @@ type State struct {
 	Timestamp   time.Time         `json:"timestamp" struct:"timestamp"`
 	TTL         time.Duration     `json:"ttl" struct:"ttl"`
 	Type        string            `json:"type"  struct:"type"`
-	Meta        map[string]string `json:"meta" struct:"meta"`
-	FileStateOS file.StateOS
+	Meta        map[string]string `json:"meta" struct:"meta,omitempty"`
+	FileStateOS file.StateOS      `json:"FileStateOS" struct:"FileStateOS"`
 }
 
 // NewState creates a new file state
