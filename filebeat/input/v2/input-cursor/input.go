@@ -72,7 +72,9 @@ func (inp *managedInput) Test(ctx input.TestContext) error {
 	var grp unison.MultiErrGroup
 	for _, source := range inp.sources {
 		source := source
-		grp.Go(func() error { return inp.input.Test(source, ctx) })
+		grp.Go(func() (err error) {
+			return inp.testSource(ctx, source)
+		})
 	}
 
 	errs := grp.Wait()
@@ -80,6 +82,16 @@ func (inp *managedInput) Test(ctx input.TestContext) error {
 		return sderr.WrapAll(errs, "input tests failed")
 	}
 	return nil
+}
+
+func (inp *managedInput) testSource(ctx input.TestContext, source Source) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("input panic with: %+v\n%s", v, debug.Stack())
+			ctx.Logger.Errorf("Input crashed with: %+v", err)
+		}
+	}()
+	return inp.input.Test(source, ctx)
 }
 
 // Run creates a go-routine per source, waiting until all go-routines have

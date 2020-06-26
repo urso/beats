@@ -19,6 +19,7 @@ package cursor
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/urso/sderr"
@@ -63,7 +64,9 @@ type InputManager struct {
 	// that will be used to collect events from each source.
 	Configure func(cfg *common.Config) ([]Source, Input, error)
 
-	store *store
+	initOnce sync.Once
+	initErr  error
+	store    *store
 }
 
 // Source describe a source the input can collect data from.
@@ -83,19 +86,22 @@ type StateStore interface {
 }
 
 func (cim *InputManager) init() error {
-	if cim.DefaultCleanTimeout <= 0 {
-		cim.DefaultCleanTimeout = 30 * time.Minute
-	}
+	cim.initOnce.Do(func() {
+		if cim.DefaultCleanTimeout <= 0 {
+			cim.DefaultCleanTimeout = 30 * time.Minute
+		}
 
-	log := cim.Logger.With("input_type", cim.Type)
-	store, err := openStore(log, cim.StateStore, cim.Type)
-	if err != nil {
-		return err
-	}
+		log := cim.Logger.With("input_type", cim.Type)
+		var store *store
+		store, cim.initErr = openStore(log, cim.StateStore, cim.Type)
+		if cim.initErr != nil {
+			return
+		}
 
-	cim.store = store
+		cim.store = store
+	})
 
-	return nil
+	return cim.initErr
 }
 
 // Init starts background processes for deleting old entries from the
@@ -140,6 +146,10 @@ func (cim *InputManager) shutdown() {
 // Create builds a new v2.Input using the provided Configure function.
 // The Input will run a go-routine per source that has been configured.
 func (cim *InputManager) Create(config *common.Config) (input.Input, error) {
+	if err := cim.init(); err != nil {
+		return nil, err
+	}
+
 	settings := struct {
 		ID           string        `config:"id"`
 		CleanTimeout time.Duration `config:"clean_timeout"`
