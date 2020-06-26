@@ -137,21 +137,6 @@ type ClientEventer interface {
 	DroppedOnPublish(Event) // event has been dropped, while waiting for the queue
 }
 
-// PipelineACKHandler configures some pipeline-wide event ACK handler.
-type PipelineACKHandler struct {
-	// ACKCount reports the number of published events recently acknowledged
-	// by the pipeline.
-	ACKCount func(int)
-
-	// ACKEvents reports the events recently acknowledged by the pipeline.
-	// Only the events 'Private' field will be reported.
-	ACKEvents func([]interface{})
-
-	// ACKLastEvent reports the last ACKed event per pipeline client.
-	// Only the events 'Private' field will be reported.
-	ACKLastEvents func([]interface{})
-}
-
 type ProcessorList interface {
 	Processor
 	All() []Processor
