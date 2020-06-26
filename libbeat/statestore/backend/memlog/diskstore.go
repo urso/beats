@@ -32,22 +32,30 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
+// diskstore manages the on-disk state of the memlog store.
 type diskstore struct {
-	log            *logp.Logger
+	log *logp.Logger
+
+	// store configuration
 	checkpointPred CheckpointPredicate
+	fileMode       os.FileMode
+	bufferSize     int
 
 	// on disk file tracking information
 	home        string         // home path of the store
 	logFilePath string         // current log file
 	dataFiles   []dataFileInfo // set of data files found
 
+	// txid is the sequential counter that tracks
+	// all updates to the store. The txid is added to operation being logged
+	// used as name for the data files.
 	txid uint64
 
-	fileMode   os.FileMode
-	bufferSize int
-	logFile    *os.File
-	logBuf     *bufio.Writer
+	// log file access. The log file is updated using an in memory write buffer.
+	logFile *os.File
+	logBuf  *bufio.Writer
 
+	// internal state and metrics
 	logFileSize      uint64
 	logEntries       uint
 	logInvalid       bool

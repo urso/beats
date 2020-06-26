@@ -21,17 +21,15 @@ package memlog
 
 import (
 	"os"
-
-	"golang.org/x/sys/unix"
 )
 
 // syncFile implements the fsync operation for most *nix systems.
 // The call is retried if EINTR or EAGAIN is returned.
 func syncFile(f *os.File) error {
-	// best effort
+	// best effort.
 	for {
 		err := f.Sync()
-		if err == nil || (err != unix.EINTR && err != unix.EAGAIN) {
+		if err == nil || !isRetryErr(err) {
 			return err
 		}
 	}
