@@ -112,7 +112,6 @@ class Registry:
         self._active_path = os.path.join(self.path, "active.dat")
 
     def exists(self):
-        print("check registry exists at: {}".format(self.path))
         return os.path.isfile(self._log_path)
 
     def load(self, filter=None):
@@ -141,7 +140,7 @@ class Registry:
                 iter_objs = (json.loads(line) for line in f)
                 for action, entry in zip(iter_objs, iter_objs):
                     if action['op'] == 'remove':
-                        del data['k']
+                        del data[entry['k']]
                     elif action['op'] == 'set':
                         v = entry['v']
                         v['_key'] = entry['k']
