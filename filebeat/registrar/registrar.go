@@ -247,7 +247,7 @@ func (r *Registrar) gcStates() {
 	beforeCount := r.states.Count()
 	cleanedStates, pendingClean := r.states.CleanupWith(func(id string) {
 		// TODO: report error
-		r.store.Remove(id)
+		r.store.Remove(fileStatePrefix + id)
 	})
 	statesCleanup.Add(int64(cleanedStates))
 
