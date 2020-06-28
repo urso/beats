@@ -20,6 +20,7 @@ package memlog
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -72,20 +73,35 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, chec
 		}
 	} else if !fi.Mode().IsDir() {
 		return nil, fmt.Errorf("'%v' is no directory", home)
+	} else {
+		if err := pathEnsurePermissions(filepath.Join(home, metaFileName), mode); err != nil {
+			return nil, fmt.Errorf("failed to update meta file permissions: %w", err)
+		}
 	}
 
 	meta, err := readMetaFile(home)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := checkMeta(meta); err != nil {
 		return nil, err
+	}
+
+	if err := pathEnsurePermissions(filepath.Join(home, activeDataFileName), mode); err != nil {
+		return nil, fmt.Errorf("failed to update active file permissions: %w", err)
 	}
 
 	dataFiles, err := listDataFiles(home)
 	if err != nil {
 		return nil, err
+	}
+	for _, df := range dataFiles {
+		if err := pathEnsurePermissions(df.path, mode); err != nil {
+			return nil, fmt.Errorf("failed to update data file permissions: %w", err)
+		}
+	}
+	if err := pathEnsurePermissions(filepath.Join(home, logFileName), mode); err != nil {
+		return nil, fmt.Errorf("failed to update log file permissions: %w", err)
 	}
 
 	active, txid := activeDataFile(dataFiles)

@@ -90,8 +90,9 @@ type logAction struct {
 }
 
 const (
-	logFileName  = "log.json"
-	metaFileName = "meta.json"
+	logFileName        = "log.json"
+	metaFileName       = "meta.json"
+	activeDataFileName = "active.data"
 
 	storeVersion = "1"
 
