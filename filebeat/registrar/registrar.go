@@ -133,8 +133,13 @@ func (r *Registrar) Stop() {
 
 func (r *Registrar) Run() {
 	logp.Debug("registrar", "Starting Registrar")
+	defer logp.Debug("registrar", "Stopping Registrar")
 
 	defer r.store.Close()
+
+	defer func() {
+		writeStates(r.store, r.states.GetStates())
+	}()
 
 	var (
 		// we keep a long running write transaction.
