@@ -59,7 +59,7 @@ type entry struct {
 // If an error in in the log file is detected, the store opening routine continues from the last known valid state and will trigger a checkpoint
 // operation on subsequent writes, also truncating the log file.
 // Old data files are scheduled for deletion later.
-func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, checkpoint CheckpointPredicate) (*store, error) {
+func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, mustCheckMeta bool, checkpoint CheckpointPredicate) (*store, error) {
 	fi, err := os.Stat(home)
 	if os.IsNotExist(err) {
 		err = os.MkdirAll(home, os.ModeDir|0770)
@@ -79,12 +79,14 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, chec
 		}
 	}
 
-	meta, err := readMetaFile(home)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkMeta(meta); err != nil {
-		return nil, err
+	if mustCheckMeta {
+		meta, err := readMetaFile(home)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkMeta(meta); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := pathEnsurePermissions(filepath.Join(home, activeDataFileName), mode); err != nil {
