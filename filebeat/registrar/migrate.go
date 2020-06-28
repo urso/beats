@@ -204,9 +204,10 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 	states = resetStates(fixStates(states))
 
 	registryBackend, err := memlog.New(logp.NewLogger("migration"), memlog.Settings{
-		Root:       home,
-		FileMode:   perm,
-		Checkpoint: func(_ uint64) bool { return true },
+		Root:               home,
+		FileMode:           perm,
+		Checkpoint:         func(_ uint64) bool { return true },
+		IgnoreVersionCheck: true,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to create new registry backend")
@@ -227,6 +228,13 @@ func migrateVersion1(home, regHome string, perm os.FileMode) error {
 
 	if err := os.Remove(origDataFile); err != nil {
 		return errors.Wrapf(err, "migration complete but failed to remove original data file: %v", origDataFile)
+	}
+
+	if err := ioutil.WriteFile(
+		filepath.Join(regHome, "meta.json"),
+		[]byte(`{"version": "1"}`),
+		perm); err != nil {
+		return fmt.Errorf("failed to update the meta.json file: %w", err)
 	}
 
 	return nil
