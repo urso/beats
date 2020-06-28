@@ -129,7 +129,7 @@ class Registry:
         data = {}
         data_file_path = None
         if os.path.isfile(self._active_path):
-            with open(self._path) as f:
+            with open(self._active_path) as f:
                 data_file_path = f.read().strip()
         if data_file_path and os.path.isfile(data_file_path):
             with open(data_file_path) as f:
