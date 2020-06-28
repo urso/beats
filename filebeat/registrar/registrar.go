@@ -274,7 +274,7 @@ func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 	var states []file.State
 
 	err := store.Each(func(key string, dec statestore.ValueDecoder) (bool, error) {
-		if strings.HasPrefix(key, fileStatePrefix) {
+		if !strings.HasPrefix(key, fileStatePrefix) {
 			return true, nil
 		}
 
@@ -287,7 +287,7 @@ func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 			return true, nil
 		}
 
-		st.Id = key
+		st.Id = key[len(fileStatePrefix):]
 		states = append(states, st)
 		return true, nil
 	})
@@ -296,6 +296,7 @@ func readStatesFrom(store *statestore.Store) ([]file.State, error) {
 		return nil, err
 	}
 
+	states = fixStates(states)
 	states = resetStates(states)
 	return states, nil
 }
