@@ -380,7 +380,7 @@ class Test(BaseTest):
         # Wait until rotation is detected
         self.wait_until(
             lambda: self.log_contains_count(
-                "Registry file updated. 1 states written") >= 1,
+                "Registry file updated. 1 active states") >= 1,
             max_timeout=10)
 
         data = self.get_registry()
@@ -476,7 +476,7 @@ class Test(BaseTest):
         filebeat.check_kill_and_wait()
 
         # Store first registry file
-        registry_file = "registry/filebeat/data.json"
+        registry_file = "registry/filebeat/log.json"
         shutil.copyfile(
             self.working_dir + "/" + registry_file,
             self.working_dir + "/registry.first",
@@ -577,7 +577,7 @@ class Test(BaseTest):
         filebeat.check_kill_and_wait()
 
         # Store first registry file
-        registry_file = "registry/filebeat/data.json"
+        registry_file = "registry/filebeat/log.json"
         shutil.copyfile(
             self.working_dir + "/" + registry_file,
             self.working_dir + "/registry.first",
@@ -680,7 +680,7 @@ class Test(BaseTest):
 
         self.wait_until(
             lambda: self.log_contains_count(
-                "Registry file updated. 2 states written.") >= 1,
+                "Registry file updated. 2 active states.") >= 1,
             max_timeout=15)
 
         time.sleep(1)
@@ -756,7 +756,7 @@ class Test(BaseTest):
 
         self.wait_until(
             lambda: self.log_contains_count(
-                "Registry file updated. 2 states written.") >= 1,
+                "Registry file updated. 2 active states.") >= 1,
             max_timeout=15)
 
         # Wait a moment to make sure registry is completely written
@@ -925,41 +925,6 @@ class Test(BaseTest):
         # Make sure the last file in the registry is the correct one and has the correct offset
         assert data[0]["offset"] == self.input_logs.size(file2)
 
-    def test_symlink_failure(self):
-        """
-        Test that filebeat does not start if a symlink is set as registry file
-        """
-        self.render_config_template(
-            path=os.path.abspath(self.working_dir) + "/log/*",
-        )
-        os.mkdir(self.working_dir + "/log/")
-
-        testfile_path = self.working_dir + "/log/test.log"
-        with open(testfile_path, 'w') as testfile:
-            testfile.write("Hello World\n")
-
-        registry_file = self.working_dir + "/registry/filebeat/data.json"
-        link_to_file = self.working_dir + "registry.data"
-        os.makedirs(self.working_dir + "/registry/filebeat")
-
-        with open(link_to_file, 'w') as f:
-            f.write("[]")
-
-        if os.name == "nt":
-            import win32file  # pylint: disable=import-error
-            win32file.CreateSymbolicLink(registry_file, link_to_file, 0)
-        else:
-            os.symlink(link_to_file, registry_file)
-
-        filebeat = self.start_beat()
-
-        # Make sure states written appears one more time
-        self.wait_until(
-            lambda: self.log_contains("Exiting: Registry file path is not a regular file"),
-            max_timeout=10)
-
-        filebeat.check_kill_and_wait(exit_code=1)
-
     def test_restart_state(self):
         """
         Make sure that states are rewritten correctly on restart and cleaned
@@ -1086,7 +1051,7 @@ class Test(BaseTest):
             max_timeout=30)
 
         self.wait_until(
-            lambda: self.log_contains("Registry file updated. 1 states written.",
+            lambda: self.log_contains("Registry file updated. 1 active states.",
                                       logfile="filebeat.log"), max_timeout=10)
 
         filebeat.check_kill_and_wait()
@@ -1145,7 +1110,7 @@ class Test(BaseTest):
             max_timeout=30)
 
         self.wait_until(
-            lambda: self.log_contains("Registry file updated. 1 states written.",
+            lambda: self.log_contains("Registry file updated. 1 active states.",
                                       logfile="filebeat.log"), max_timeout=10)
 
         filebeat.check_kill_and_wait()
