@@ -140,7 +140,8 @@ class Registry:
                 iter_objs = (json.loads(line) for line in f)
                 for action, entry in zip(iter_objs, iter_objs):
                     if action['op'] == 'remove':
-                        del data[entry['k']]
+                        if entry['k'] in data:
+                            del data[entry['k']]
                     elif action['op'] == 'set':
                         v = entry['v']
                         v['_key'] = entry['k']
