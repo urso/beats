@@ -107,7 +107,7 @@ func testLoadVersion1Case(t *testing.T, dataPath string) {
 	}
 
 	// load store:
-	store, err := openStore(logp.NewLogger("test"), path, 0660, 4096, func(_ uint64) bool {
+	store, err := openStore(logp.NewLogger("test"), path, 0660, 4096, true, func(_ uint64) bool {
 		return false
 	})
 	if err != nil {
@@ -119,9 +119,9 @@ func testLoadVersion1Case(t *testing.T, dataPath string) {
 	disk.removeOldDataFiles()
 
 	// validate store:
-	assert.Equal(t, expected.Txid, disk.txid)
+	assert.Equal(t, expected.Txid, disk.nextTxID-1)
 	if expected.Datafile != "" {
-		assert.Equal(t, filepath.Join(path, expected.Datafile), disk.dataFiles[0].path)
+		assert.Equal(t, filepath.Join(path, expected.Datafile), disk.activeDataFile.path)
 	}
 
 	// check all keys in expected are known and do match stored values:

@@ -106,10 +106,14 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, must
 		return nil, fmt.Errorf("failed to update log file permissions: %w", err)
 	}
 
-	active, txid := activeDataFile(dataFiles)
 	tbl := map[string]entry{}
-	if err := loadDataFile(active, tbl); err != nil {
-		return nil, err
+	var txid uint64
+	if L := len(dataFiles); L > 0 {
+		active := dataFiles[L-1]
+		txid = active.txid
+		if err := loadDataFile(active.path, tbl); err != nil {
+			return nil, err
+		}
 	}
 
 	logp.Info("Loading data file of '%v' succeeded. Active transaction id=%v", home, txid)

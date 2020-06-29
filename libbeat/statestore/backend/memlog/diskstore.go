@@ -42,14 +42,15 @@ type diskstore struct {
 	bufferSize     int
 
 	// on disk file tracking information
-	home        string         // home path of the store
-	logFilePath string         // current log file
-	dataFiles   []dataFileInfo // set of data files found
+	home           string         // home path of the store
+	logFilePath    string         // current log file
+	oldDataFiles   []dataFileInfo // unused data files that can be removed
+	activeDataFile dataFileInfo   // most recent data file that needs to be kept on disk
 
-	// txid is the sequential counter that tracks
-	// all updates to the store. The txid is added to operation being logged
+	// nextTxID is the sequential counter that tracks
+	// all updates to the store. The nextTxID is added to operation being logged
 	// used as name for the data files.
-	txid uint64
+	nextTxID uint64
 
 	// log file access. The log file is updated using an in memory write buffer.
 	logFile *os.File
@@ -65,6 +66,10 @@ type diskstore struct {
 // dataFileInfo is used to track and sort on disk data files.
 // We should have only one data file on disk, but in case delete operations
 // have failed or not finished dataFileInfo is used to detect the ordering.
+//
+// dataFileInfo can be ordered on txid. When sorting isTxIDLessEqual should be
+// used, to get the correct ordering even in the case of integer overflows.
+// For sorting a slice of dataFileInfo use sortDataFileInfos.
 type dataFileInfo struct {
 	path string
 	txid uint64
@@ -114,12 +119,19 @@ func newDiskStore(
 	bufferSize uint,
 	checkpointPred CheckpointPredicate,
 ) *diskstore {
+	var active dataFileInfo
+	if L := len(dataFiles); L > 0 {
+		active = dataFiles[L-1]
+		dataFiles = dataFiles[:L-1]
+	}
+
 	s := &diskstore{
 		log:              log.With("path", home),
 		home:             home,
 		logFilePath:      filepath.Join(home, logFileName),
-		dataFiles:        dataFiles,
-		txid:             txid,
+		oldDataFiles:     dataFiles,
+		activeDataFile:   active,
+		nextTxID:         txid + 1,
 		fileMode:         mode,
 		bufferSize:       int(bufferSize),
 		logFile:          nil,
@@ -235,7 +247,7 @@ func (s *diskstore) LogOperation(op op) error {
 
 	if err := enc.Encode(logAction{
 		Op: op.name(),
-		ID: s.txid + 1,
+		ID: s.nextTxID,
 	}); err != nil {
 		return err
 	}
@@ -252,7 +264,7 @@ func (s *diskstore) LogOperation(op op) error {
 
 	ok = true
 	s.logEntries++
-	s.txid++
+	s.nextTxID++
 	return nil
 }
 
@@ -273,7 +285,11 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 		return err
 	}
 
-	fileTxID := s.txid + 1
+	// The checkpoint is assigned the next available transaction id. This
+	// guarantees that all existing log entries are 'older' then the checkpoint
+	// file and subsequenent operations.  The first operation after a successful
+	// checkpoint will be (fileTxID + 1).
+	fileTxID := s.nextTxID
 	fileName := fmt.Sprintf("%v.json", fileTxID)
 	checkpointPath := filepath.Join(s.home, fileName)
 
@@ -286,16 +302,18 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	s.checkpointClearLog()
 
 	// finish current on-disk transaction by increasing the txid
-	s.txid++
+	s.nextTxID++
 
-	s.dataFiles = append(s.dataFiles, dataFileInfo{
+	if s.activeDataFile.path != "" {
+		s.oldDataFiles = append(s.oldDataFiles, s.activeDataFile)
+	}
+	s.activeDataFile = dataFileInfo{
 		path: checkpointPath,
 		txid: fileTxID,
-	})
+	}
 
 	// delete old transaction files
-	active, _ := activeDataFile(s.dataFiles)
-	updateActiveMarker(s.log, s.home, active)
+	updateActiveMarker(s.log, s.home, s.activeDataFile.path)
 	s.removeOldDataFiles()
 
 	trySyncPath(s.home)
@@ -383,12 +401,15 @@ func (s *diskstore) checkpointClearLog() {
 	s.logFileSize = 0
 }
 
-func updateActiveMarker(log *logp.Logger, home, active string) error {
-	activeLink := filepath.Join(home, "active.dat")
-	tmpLink := filepath.Join(home, "active.dat")
-	log = log.With("temporary", tmpLink, "data_file", active, "link_file", activeLink)
+// updateActiveMarker overwrites the active.dat file in the home directory with
+// the path of the most recent checkpoint file.
+// The active file will be written to `<homePath>`/active.dat.
+func updateActiveMarker(log *logp.Logger, homePath, checkpointFilePath string) error {
+	activeLink := filepath.Join(homePath, "active.dat")
+	tmpLink := filepath.Join(homePath, "active.dat.new")
+	log = log.With("temporary", tmpLink, "data_file", checkpointFilePath, "link_file", activeLink)
 
-	if active == "" {
+	if checkpointFilePath == "" {
 		if err := os.Remove(activeLink); err != nil { // try, remove active symlink if present.
 			log.Errorf("Failed to remove old pointer file: %v", err)
 		}
@@ -396,13 +417,13 @@ func updateActiveMarker(log *logp.Logger, home, active string) error {
 	}
 
 	// Atomically try to update the pointer file to the most recent data file.
-	// We 'simulate' the atomic update by create the temporary active.json.tmp symlink file,
-	// which we rename to active.json. If active.json.tmp exists we remove it.
+	// We 'simulate' the atomic update by create the temporary active.dat.new symlink file,
+	// which we rename to active.dat. If active.dat.tmp exists we remove it.
 	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
 		log.Errorf("Failed to remove old temporary symlink file: %v", err)
 		return err
 	}
-	if err := ioutil.WriteFile(tmpLink, []byte(active), 0600); err != nil {
+	if err := ioutil.WriteFile(tmpLink, []byte(checkpointFilePath), 0600); err != nil {
 		log.Errorf("Failed to write temporary pointer file: %v", err)
 		return err
 	}
@@ -411,42 +432,23 @@ func updateActiveMarker(log *logp.Logger, home, active string) error {
 		return err
 	}
 
-	trySyncPath(home)
+	trySyncPath(homePath)
 	return nil
 }
 
 // removeOldDataFiles sorts the data files by their update sequence number and
 // finally deletes all but the newest file from the storage directory.
 func (s *diskstore) removeOldDataFiles() {
-	L := len(s.dataFiles)
-	if L <= 1 {
-		return
-	}
-
-	removable, keep := s.dataFiles[:L-1], s.dataFiles[L-1:]
-	for i := range removable {
-		path := removable[i].path
+	for i := range s.oldDataFiles {
+		path := s.oldDataFiles[i].path
 		err := os.Remove(path)
-		if err == nil || os.IsNotExist(err) {
-			continue
+		if err != nil && !os.IsNotExist(err) {
+			s.log.With("file", path).Errorf("Failed to delete old data file: %v", err)
+			s.oldDataFiles = s.oldDataFiles[i:]
+			return
 		}
-
-		// ohoh... stop removing and construct new array of leftover data files
-		s.dataFiles = append(removable[i:], keep...)
-		return
 	}
-	s.dataFiles = keep
-}
-
-// activeDataFile returns the most recent data file in a list of present (sorted)
-// data files.
-func activeDataFile(infos []dataFileInfo) (string, uint64) {
-	if len(infos) == 0 {
-		return "", 0
-	}
-
-	active := infos[len(infos)-1]
-	return active.path, active.txid
+	s.oldDataFiles = nil
 }
 
 // listDataFiles returns a sorted list of data files with txid per file.
@@ -486,10 +488,15 @@ func listDataFiles(home string) ([]dataFileInfo, error) {
 	}
 
 	// sort files by transaction ID
+	sortDataFileInfos(infos)
+	return infos, nil
+}
+
+// sortDataFileInfos sorts the slice by the files txid.
+func sortDataFileInfos(infos []dataFileInfo) {
 	sort.Slice(infos, func(i, j int) bool {
 		return isTxIDLessEqual(infos[i].txid, infos[j].txid)
 	})
-	return infos, nil
 }
 
 // loadDataFile create a new hashtable with all key/value pairs found.
