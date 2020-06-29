@@ -130,7 +130,10 @@ func openStore(log *logp.Logger, home string, mode os.FileMode, bufSz uint, must
 		logp.Warn("Incomplete or corrupted log file in %v. Continue with last known complete and consistend state. Reason: %v", home, err)
 	}
 
-	diskstore := newDiskStore(log, home, dataFiles, txid, mode, entries, err != nil, bufSz, checkpoint)
+	diskstore, err := newDiskStore(log, home, dataFiles, txid, mode, entries, err != nil, bufSz, checkpoint)
+	if err != nil {
+		return nil, err
+	}
 
 	return &store{
 		disk: diskstore,

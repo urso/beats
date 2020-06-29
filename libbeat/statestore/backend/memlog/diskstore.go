@@ -95,9 +95,11 @@ type logAction struct {
 }
 
 const (
-	logFileName        = "log.json"
-	metaFileName       = "meta.json"
-	activeDataFileName = "active.data"
+	logFileName           = "log.json"
+	metaFileName          = "meta.json"
+	activeDataFileName    = "active.dat"
+	activeDataTmpFileName = "active.dat.new"
+	checkpointTmpFileName = "checkpoint.new"
 
 	storeVersion = "1"
 
@@ -118,7 +120,7 @@ func newDiskStore(
 	logInvalid bool,
 	bufferSize uint,
 	checkpointPred CheckpointPredicate,
-) *diskstore {
+) (*diskstore, error) {
 	var active dataFileInfo
 	if L := len(dataFiles); L > 0 {
 		active = dataFiles[L-1]
@@ -142,8 +144,19 @@ func newDiskStore(
 		checkpointPred:   checkpointPred,
 	}
 
+	// delete temporary files from an older instances that was interrupted
+	// during a checkpoint process.
+	// Note: we do not delete old data files yet, in case we need them for debugging,
+	//       or to manually restore some older state after disk outages.
+	if err := os.Remove(filepath.Join(home, checkpointTmpFileName)); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.Remove(filepath.Join(home, activeDataTmpFileName)); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
 	_ = s.tryOpenLog()
-	return s
+	return s, nil
 }
 
 // tryOpenLog access the update log. The log file is truncated if a checkpoint operation has been
@@ -280,10 +293,14 @@ func (s *diskstore) LogOperation(op op) error {
 // NOTE: due to limitation on some Operating system or file systems, the active
 //       marker is not a symlink, but an actual file.
 func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
-	tmpPath, err := s.checkpointTmpFile(filepath.Join(s.home, "checkpoint"), state)
+	tmpPath, err := s.checkpointTmpFile(filepath.Join(s.home, checkpointTmpFileName), state)
 	if err != nil {
 		return err
 	}
+
+	// silently try to delete the temporary checkpoint file on error.
+	// Deletion of tmpPath will fail if the rename operation did succeed.
+	defer os.Remove(tmpPath)
 
 	// The checkpoint is assigned the next available transaction id. This
 	// guarantees that all existing log entries are 'older' then the checkpoint
@@ -320,8 +337,7 @@ func (s *diskstore) WriteCheckpoint(state map[string]entry) error {
 	return nil
 }
 
-func (s *diskstore) checkpointTmpFile(baseName string, states map[string]entry) (string, error) {
-	tempfile := baseName + ".new"
+func (s *diskstore) checkpointTmpFile(tempfile string, states map[string]entry) (string, error) {
 	f, err := os.OpenFile(tempfile, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_SYNC, s.fileMode)
 	if err != nil {
 		return "", err
@@ -405,8 +421,8 @@ func (s *diskstore) checkpointClearLog() {
 // the path of the most recent checkpoint file.
 // The active file will be written to `<homePath>`/active.dat.
 func updateActiveMarker(log *logp.Logger, homePath, checkpointFilePath string) error {
-	activeLink := filepath.Join(homePath, "active.dat")
-	tmpLink := filepath.Join(homePath, "active.dat.new")
+	activeLink := filepath.Join(homePath, activeDataFileName)
+	tmpLink := filepath.Join(homePath, activeDataTmpFileName)
 	log = log.With("temporary", tmpLink, "data_file", checkpointFilePath, "link_file", activeLink)
 
 	if checkpointFilePath == "" {
