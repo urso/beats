@@ -20,6 +20,7 @@ package cursor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sort"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	pubtest "github.com/elastic/beats/v7/libbeat/publisher/testing"
 	"github.com/elastic/beats/v7/libbeat/tests/resources"
 	"github.com/elastic/go-concert/unison"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -336,6 +338,69 @@ func TestManager_InputsRun(t *testing.T) {
 		cancel()
 		require.NoError(t, err)
 		require.Equal(t, 0, clientCounters.Active())
+	})
+
+	t.Run("continue sending from last known position", func(t *testing.T) {
+		log := logp.NewLogger("test")
+
+		type runConfig struct{ Max int }
+
+		store := testOpenStore(t, "test", createSampleStore(t, nil))
+		defer store.Release()
+
+		manager := simpleManagerWithConfigure(t, func(cfg *common.Config) ([]Source, Input, error) {
+			config := runConfig{}
+			if err := cfg.Unpack(&config); err != nil {
+				return nil, nil, err
+			}
+
+			inp := &fakeTestInput{
+				OnRun: func(_ input.Context, _ Source, cursor Cursor, pub Publisher) error {
+					state := struct{ N int }{}
+					if !cursor.IsNew() {
+						if err := cursor.Unpack(&state); err != nil {
+							return fmt.Errorf("failed to unpack cursor: %w", err)
+						}
+					}
+
+					for i := 0; i < config.Max; i++ {
+						event := beat.Event{Fields: common.MapStr{"n": state.N}}
+						state.N++
+						pub.Publish(event, state)
+					}
+					return nil
+				},
+			}
+
+			return sourceList("test"), inp, nil
+		})
+
+		var ids []int
+		pipeline := pubtest.ConstClient(&pubtest.FakeClient{
+			PublishFunc: func(event beat.Event) {
+				id := event.Fields["n"].(int)
+				ids = append(ids, id)
+			},
+		})
+
+		// create and run first instance
+		inp, err := manager.Create(common.MustNewConfigFrom(runConfig{Max: 3}))
+		require.NoError(t, err)
+		require.NoError(t, inp.Run(input.Context{
+			Logger:      log,
+			Cancelation: context.Background(),
+		}, pipeline))
+
+		// create and run second instance instance
+		inp, err = manager.Create(common.MustNewConfigFrom(runConfig{Max: 3}))
+		require.NoError(t, err)
+		inp.Run(input.Context{
+			Logger:      log,
+			Cancelation: context.Background(),
+		}, pipeline)
+
+		// verify
+		assert.Equal(t, []int{0, 1, 2, 3, 4, 5}, ids)
 	})
 
 	t.Run("event ACK triggers execution of update operations", func(t *testing.T) {
