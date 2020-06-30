@@ -55,7 +55,7 @@ type Settings struct {
 	// configured, memlog will automatically trigger a checkpoint every 10MB.
 	Checkpoint CheckpointPredicate
 
-	// If set memlog will not check the version.
+	// If set memlog will not check the version of the meta file.
 	IgnoreVersionCheck bool
 }
 
