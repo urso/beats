@@ -253,8 +253,18 @@ func (a *eventDataACKer) onACK(acked, total int) {
 // LastEventPrivateReporter reports only the 'latest' published and acked
 // event if a batch of events have been ACKed.
 func LastEventPrivateReporter(fn func(acked int, data interface{})) beat.ACKer {
+	ignored := 0
 	return EventPrivateReporter(func(acked int, data []interface{}) {
-		fn(acked, data[len(data)-1])
+		for i := len(data) - 1; i >= 0; i-- {
+			if d := data[i]; d != nil {
+				fn(ignored+acked, d)
+				ignored = 0
+				return
+			}
+		}
+
+		// complete batch has been ignored due to missing data -> add count
+		ignored += acked
 	})
 }
 
@@ -297,9 +307,8 @@ type clientOnlyACKer struct {
 
 func (a *clientOnlyACKer) AddEvent(event beat.Event, published bool) {
 	a.mu.Lock()
-	sub := a.acker
-	a.mu.Unlock()
-	if sub != nil {
+	defer a.mu.Unlock()
+	if sub := a.acker; sub != nil {
 		sub.AddEvent(event, published)
 	}
 }
