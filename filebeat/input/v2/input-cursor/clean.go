@@ -20,9 +20,10 @@ package cursor
 import (
 	"time"
 
-	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/go-concert/timed"
 	"github.com/elastic/go-concert/unison"
+
+	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
 // cleaner removes finished entries from the registry file.

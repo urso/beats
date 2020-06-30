@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
@@ -29,8 +30,6 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/statestore"
-
-	"github.com/elastic/go-concert/unison"
 )
 
 // InputManager is used to create, manage, and coordinate stateful inputs and
