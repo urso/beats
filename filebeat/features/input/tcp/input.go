@@ -22,7 +22,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
@@ -108,28 +107,8 @@ func (s *server) Run(ctx input.Context, publisher stateless.Publisher) error {
 
 	ctx.Logger.Debugf("TCP Input '%v' initialized", ctx.ID)
 
-	// run server in background and add support to wait for shutdown
-	// Note: We start the server before setting up shutdown signaling. Doing it the
-	// other way around can lead to panics or the input not shutting down in
-	// case the beat has already received the shutdown signal while starting up.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err = server.Run()
-	}()
-	ctx.Logger.Debugf("TCP Input '%v' active", ctx.ID)
-
-	// make sure we call server.Stop() on shutdown or if Run has finished by
-	// itself.
-	_, cancel := ctxtool.WithFunc(ctxtool.FromCanceller(ctx.Cancelation), func() {
-		ctx.Logger.Debugf("TCP Input '%v' received stop signal", ctx.ID)
-		server.Stop()
-	})
-	defer cancel()
-
-	// wait for 'Run' to return
-	wg.Wait()
+	cancelCtx := ctxtool.FromCanceller(ctx.Cancelation)
+	err = server.Run(cancelCtx)
 
 	// ignore error from 'Run' in case shutdown was signaled.
 	if ctxerr := ctx.Cancelation.Err(); ctxerr != nil {

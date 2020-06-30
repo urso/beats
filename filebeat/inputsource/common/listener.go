@@ -74,15 +74,15 @@ func NewListener(family Family, location string, handlerFactory HandlerFactory, 
 
 // Start listen to the socket.
 func (l *Listener) Start() error {
-	if err := l.initListen(); err != nil {
+	var err error
+	l.Listener, err = l.listenerFactory()
+	if err != nil {
 		return err
 	}
 
-	l.ctx, l.cancel = context.WithCancel(context.Background())
-	go func() {
-		<-l.ctx.Done()
-		l.Listener.Close()
-	}()
+	if err := l.initListen(context.Background()); err != nil {
+		return err
+	}
 
 	l.log.Info("Started listening for " + l.family.String() + " connection")
 
@@ -99,8 +99,8 @@ func (l *Listener) Start() error {
 // being received via tha io.Reader. Most clients use the splitHandler which can take a bufio.SplitFunc and parse
 // out each message into an appropriate event. The Close() of the ConnectionHandler can be used to clean up the
 // connection either by client or server based on need.
-func (l *Listener) Run() error {
-	if err := l.initListen(); err != nil {
+func (l *Listener) Run(ctx context.Context) error {
+	if err := l.initListen(ctx); err != nil {
 		return err
 	}
 
@@ -110,23 +110,22 @@ func (l *Listener) Run() error {
 	return nil
 }
 
-func (l *Listener) initListen() error {
+func (l *Listener) initListen(ctx context.Context) error {
 	var err error
 	l.Listener, err = l.listenerFactory()
 	if err != nil {
 		return err
 	}
 
-	l.closer.callback = func() { l.Listener.Close() }
+	l.ctx, l.cancel = context.WithCancel(ctx)
+	go func() {
+		<-l.ctx.Done()
+		l.Listener.Close()
+	}()
 	l.log.Info("Started listening for " + l.family.String() + " connection")
 	return nil
 }
 
-// Run start and run a new TCP listener to receive new data. When a new connection is accepted, the factory is used
-// to create a ConnectionHandler. The ConnectionHandler takes the connection as input and handles the data that is
-// being received via tha io.Reader. Most clients use the splitHandler which can take a bufio.SplitFunc and parse
-// out each message into an appropriate event. The Close() of the ConnectionHandler can be used to clean up the
-// connection either by client or server based on need.
 func (l *Listener) run() {
 	for {
 		conn, err := l.Listener.Accept()
