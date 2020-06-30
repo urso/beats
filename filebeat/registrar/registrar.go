@@ -33,8 +33,9 @@ import (
 
 type Registrar struct {
 	// registrar event input and output
-	Channel chan []file.State
-	out     successLogger
+	Channel              chan []file.State
+	out                  successLogger
+	bufferedStateUpdates int
 
 	// shutdown handling
 	done chan struct{}
@@ -208,6 +209,11 @@ func (r *Registrar) commitStateUpdates() error {
 		logp.Err("Error writing registrar state to statestore: %v", err)
 	}
 
+	if r.out != nil {
+		r.out.Published(r.bufferedStateUpdates)
+	}
+	r.bufferedStateUpdates = 0
+
 	return nil
 }
 
@@ -222,6 +228,7 @@ func (r *Registrar) failing(err error) {
 // onEvents processes events received from the publisher pipeline
 func (r *Registrar) onEvents(states []file.State) {
 	r.processEventStates(states)
+	r.bufferedStateUpdates += len(states)
 
 	// check if we need to enable state cleanup
 	if !r.gcEnabled {
