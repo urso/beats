@@ -110,7 +110,7 @@ func (l *Listener) initListen() error {
 	}
 
 	l.closer.callback = func() { l.Listener.Close() }
-	l.log.Info("Started listening for TCP connection")
+	l.log.Info("Started listening for " + l.family.String() + " connection")
 	return nil
 }
 
