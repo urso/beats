@@ -22,8 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastic/go-concert/unison"
 	"github.com/urso/sderr"
+
+	"github.com/elastic/go-concert/unison"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"

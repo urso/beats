@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
+	"github.com/urso/sderr"
+
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
-	"github.com/urso/sderr"
 )
 
 type journald struct {

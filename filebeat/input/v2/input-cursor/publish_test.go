@@ -21,10 +21,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/elastic/beats/v7/libbeat/beat"
-	pubtest "github.com/elastic/beats/v7/libbeat/publisher/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elastic/beats/v7/libbeat/beat"
+	pubtest "github.com/elastic/beats/v7/libbeat/publisher/testing"
 )
 
 func TestPublish(t *testing.T) {
