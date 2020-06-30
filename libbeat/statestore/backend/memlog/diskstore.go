@@ -248,7 +248,6 @@ func (s *diskstore) LogOperation(op op) error {
 
 	writer := s.logBuf
 	counting := &countWriter{w: writer}
-	enc := newJSONEncoder(counting)
 	defer func() {
 		s.logFileSize += counting.n
 	}()
@@ -258,10 +257,8 @@ func (s *diskstore) LogOperation(op op) error {
 		s.logInvalid = true
 	})
 
-	if err := enc.Encode(logAction{
-		Op: op.name(),
-		ID: s.nextTxID,
-	}); err != nil {
+	enc := newJSONEncoder(counting)
+	if err := enc.Encode(logAction{Op: op.name(), ID: s.nextTxID}); err != nil {
 		return err
 	}
 	writer.WriteByte('\n')
