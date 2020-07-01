@@ -18,55 +18,26 @@
 package journald
 
 import (
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalfield"
 	"github.com/elastic/beats/v7/libbeat/beat"
-	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
-type eventConverter struct {
-	log                *logp.Logger
-	saveRemoteHostname bool
-}
-
-type fieldConversion struct {
-	name      string
-	isInteger bool
-	dropped   bool
-}
-
-func (conv *eventConverter) Convert(
+func eventFromFields(
+	log *logp.Logger,
 	timestamp uint64,
 	entryFields map[string]string,
-	convFields map[string]fieldConversion,
+	saveRemoteHostname bool,
 ) beat.Event {
 	created := time.Now()
-	fields := common.MapStr{}
-	var custom common.MapStr
-
-	for entryKey, v := range entryFields {
-		if fieldConversionInfo, ok := convFields[entryKey]; !ok {
-			if custom == nil {
-				custom = common.MapStr{}
-			}
-			normalized := strings.ToLower(strings.TrimLeft(entryKey, "_"))
-			custom.Put(normalized, v)
-		} else if !fieldConversionInfo.dropped {
-			value := conv.convertNamedField(fieldConversionInfo, v)
-			fields.Put(fieldConversionInfo.name, value)
-		}
-	}
-
-	if len(custom) != 0 {
-		fields.Put("journald.custom", custom)
-	}
+	c := journalfield.NewConverter(log, nil)
+	fields := c.Convert(entryFields)
 
 	// if entry is coming from a remote journal, add_host_metadata overwrites the source hostname, so it
 	// has to be copied to a different field
-	if conv.saveRemoteHostname {
+	if saveRemoteHostname {
 		remoteHostname, err := fields.GetValue("host.hostname")
 		if err == nil {
 			fields.Put("log.source.address", remoteHostname)
@@ -80,24 +51,4 @@ func (conv *eventConverter) Convert(
 		Timestamp: receivedByJournal,
 		Fields:    fields,
 	}
-}
-
-func (conv *eventConverter) convertNamedField(fc fieldConversion, value string) interface{} {
-	if fc.isInteger {
-		v, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			// On some versions of systemd the 'syslog.pid' can contain the username
-			// appended to the end of the pid. In most cases this does not occur
-			// but in the cases that it does, this tries to strip ',\w*' from the
-			// value and then perform the conversion.
-			s := strings.Split(value, ",")
-			v, err = strconv.ParseInt(s[0], 10, 64)
-			if err != nil {
-				conv.log.Debugf("Failed to convert field: %s \"%v\" to int: %v", fc.name, value, err)
-				return value
-			}
-		}
-		return v
-	}
-	return value
 }

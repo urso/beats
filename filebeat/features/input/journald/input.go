@@ -20,12 +20,13 @@
 package journald
 
 import (
-	"os"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/urso/sderr"
 
+	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalfield"
+	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalread"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
 	"github.com/elastic/beats/v7/libbeat/common"
@@ -37,9 +38,9 @@ import (
 type journald struct {
 	Backoff            time.Duration
 	MaxBackoff         time.Duration
-	Seek               seekMode
-	CursorSeekFallback seekMode
-	Matches            []matcher
+	Seek               journalread.SeekMode
+	CursorSeekFallback journalread.SeekMode
+	Matches            []journalfield.Matcher
 	SaveRemoteHostname bool
 }
 
@@ -106,19 +107,11 @@ func configure(cfg *common.Config) ([]cursor.Source, cursor.Input, error) {
 func (inp *journald) Name() string { return pluginName }
 
 func (inp *journald) Test(src cursor.Source, ctx input.TestContext) error {
-	// 1. check if we can open the journal
-	j, err := openJournal(src.Name())
+	reader, err := inp.open(ctx.Logger, ctx.Cancelation, src)
 	if err != nil {
 		return err
 	}
-	defer j.Close()
-
-	// 2. check if we can apply the configured filters
-	if err := applyMatchers(j, inp.Matches); err != nil {
-		return sderr.Wrap(err, "failed to apply filters to the %{path} journal", src.Name())
-	}
-
-	return nil
+	return reader.Close()
 }
 
 func (inp *journald) Run(
@@ -130,26 +123,14 @@ func (inp *journald) Run(
 	log := ctx.Logger.With("path", src.Name())
 	checkpoint := initCheckpoint(log, cursor)
 
-	j, err := openJournal(src.Name())
+	reader, err := inp.open(ctx.Logger, ctx.Cancelation, src)
 	if err != nil {
 		return err
 	}
-	defer j.Close()
+	defer reader.Close()
 
-	if err := applyMatchers(j, inp.Matches); err != nil {
-		return sderr.Wrap(err, "failed to apply filters to the %{path} journal", src.Name())
-	}
-
-	reader := &reader{
-		log:     ctx.Logger,
-		journal: j,
-		backoff: backoff.NewExpBackoff(ctx.Cancelation.Done(), inp.Backoff, inp.MaxBackoff),
-	}
-	seekJournal(log, reader, checkpoint, inp.Seek, inp.CursorSeekFallback)
-
-	converter := eventConverter{
-		log:                log,
-		saveRemoteHostname: inp.SaveRemoteHostname,
+	if err := reader.Seek(seekBy(ctx.Logger, checkpoint, inp.Seek, inp.CursorSeekFallback)); err != nil {
+		log.Error("Continue from current position. Seek failed with: %v", err)
 	}
 
 	for {
@@ -158,7 +139,8 @@ func (inp *journald) Run(
 			return err
 		}
 
-		event := converter.Convert(entry.RealtimeTimestamp, entry.Fields, journaldEventFields)
+		event := eventFromFields(ctx.Logger, entry.RealtimeTimestamp, entry.Fields, inp.SaveRemoteHostname)
+
 		checkpoint.Position = entry.Cursor
 		checkpoint.RealtimeTimestamp = entry.RealtimeTimestamp
 		checkpoint.MonotonicTimestamp = entry.MonotonicTimestamp
@@ -167,6 +149,16 @@ func (inp *journald) Run(
 			return err
 		}
 	}
+}
+
+func (inp *journald) open(log *logp.Logger, canceler input.Canceler, src cursor.Source) (*journalread.Reader, error) {
+	backoff := backoff.NewExpBackoff(canceler.Done(), inp.Backoff, inp.MaxBackoff)
+	reader, err := journalread.Open(log, src.Name(), backoff, withFilters(inp.Matches))
+	if err != nil {
+		return nil, sderr.Wrap(err, "failed to create reader for %{path} journal", src.Name())
+	}
+
+	return reader, nil
 }
 
 func initCheckpoint(log *logp.Logger, c cursor.Cursor) checkpoint {
@@ -189,51 +181,24 @@ func initCheckpoint(log *logp.Logger, c cursor.Cursor) checkpoint {
 	return cp
 }
 
-func openJournal(path string) (*sdjournal.Journal, error) {
-	if path == localSystemJournalID {
-		j, err := sdjournal.NewJournal()
-		if err != nil {
-			err = sderr.Wrap(err, "failed to open local journal")
-		}
-		return j, err
+func withFilters(filters []journalfield.Matcher) func(*sdjournal.Journal) error {
+	return func(j *sdjournal.Journal) error {
+		return journalfield.ApplyMatchersOr(j, filters)
 	}
-
-	stat, err := os.Stat(path)
-	if err != nil {
-		return nil, sderr.Wrap(err, "failed to read meta data for %{path}", path)
-	}
-
-	if stat.IsDir() {
-		j, err := sdjournal.NewJournalFromDir(path)
-		if err != nil {
-			err = sderr.Wrap(err, "failed to open journal directory %{path}", path)
-		}
-		return j, err
-	}
-
-	j, err := sdjournal.NewJournalFromFiles(path)
-	if err != nil {
-		err = sderr.Wrap(err, "failed to open journal file %{path}", path)
-	}
-	return j, err
 }
 
-// seekJournal tries to seek to the last known position in the journal, so we can continue collecting
+// seekBy tries to find the last known position in the journal, so we can continue collecting
 // from the last known position.
 // The checkpoint is ignored if the user has configured the input to always
 // seek to the head/tail of the journal on startup.
-func seekJournal(log *logp.Logger, reader *reader, cp checkpoint, seek, defaultSeek seekMode) {
+func seekBy(log *logp.Logger, cp checkpoint, seek, defaultSeek journalread.SeekMode) (journalread.SeekMode, string) {
 	mode := seek
-	if mode == seekCursor && cp.Position == "" {
+	if mode == journalread.SeekCursor && cp.Position == "" {
 		mode = defaultSeek
-		if mode != seekHead && mode != seekTail {
+		if mode != journalread.SeekHead && mode != journalread.SeekTail {
 			log.Error("Invalid option for cursor_seek_fallback")
-			mode = seekHead
+			mode = journalread.SeekHead
 		}
 	}
-
-	err := reader.Seek(mode, cp.Position)
-	if err != nil {
-		log.Error("Continue from current position. Seek failed with: %v", err)
-	}
+	return mode, cp.Position
 }

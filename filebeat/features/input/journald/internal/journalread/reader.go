@@ -17,36 +17,98 @@
 
 // +build linux,cgo
 
-package journald
+package journalread
 
 import (
 	"fmt"
 	"io"
+	"os"
 	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
+	"github.com/urso/sderr"
 
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
+	"github.com/elastic/beats/v7/libbeat/common/cleanup"
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
-type reader struct {
+type Reader struct {
 	log     *logp.Logger
 	journal *sdjournal.Journal
 	backoff backoff.Backoff
 }
 
-func (r *reader) Seek(mode seekMode, cursor string) (err error) {
+// LocalSystemJournalID is the ID of the local system journal.
+const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
+
+func NewReader(log *logp.Logger, journal *sdjournal.Journal, backoff backoff.Backoff) *Reader {
+	return &Reader{log: log, journal: journal, backoff: backoff}
+}
+
+func Open(log *logp.Logger, path string, backoff backoff.Backoff, with ...func(j *sdjournal.Journal) error) (*Reader, error) {
+	j, err := openJournal(path)
+	if err != nil {
+		return nil, err
+	}
+
+	ok := false
+	defer cleanup.IfNot(&ok, func() { j.Close() })
+
+	for _, w := range with {
+		if err := w(j); err != nil {
+			return nil, err
+		}
+	}
+
+	ok = true
+	return NewReader(log, j, backoff), nil
+}
+
+func openJournal(path string) (*sdjournal.Journal, error) {
+	if path == localSystemJournalID || path == "" {
+		j, err := sdjournal.NewJournal()
+		if err != nil {
+			err = sderr.Wrap(err, "failed to open local journal")
+		}
+		return j, err
+	}
+
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, sderr.Wrap(err, "failed to read meta data for %{path}", path)
+	}
+
+	if stat.IsDir() {
+		j, err := sdjournal.NewJournalFromDir(path)
+		if err != nil {
+			err = sderr.Wrap(err, "failed to open journal directory %{path}", path)
+		}
+		return j, err
+	}
+
+	j, err := sdjournal.NewJournalFromFiles(path)
+	if err != nil {
+		err = sderr.Wrap(err, "failed to open journal file %{path}", path)
+	}
+	return j, err
+}
+
+func (r *Reader) Close() error {
+	return r.journal.Close()
+}
+
+func (r *Reader) Seek(mode SeekMode, cursor string) (err error) {
 	switch mode {
-	case seekHead:
+	case SeekHead:
 		err = r.journal.SeekHead()
-	case seekTail:
+	case SeekTail:
 		if err = r.journal.SeekTail(); err == nil {
 			_, err = r.journal.Next()
 		}
-	case seekCursor:
+	case SeekCursor:
 		if err = r.journal.SeekCursor(cursor); err == nil {
 			_, err = r.journal.Next()
 		}
@@ -56,7 +118,7 @@ func (r *reader) Seek(mode seekMode, cursor string) (err error) {
 	return err
 }
 
-func (r *reader) Next(cancel input.Canceler) (*sdjournal.JournalEntry, error) {
+func (r *Reader) Next(cancel input.Canceler) (*sdjournal.JournalEntry, error) {
 	for cancel.Err() == nil {
 		c, err := r.journal.Next()
 		if err != nil && err != io.EOF {
@@ -93,7 +155,7 @@ func (r *reader) Next(cancel input.Canceler) (*sdjournal.JournalEntry, error) {
 	return nil, cancel.Err()
 }
 
-func (r *reader) checkForNewEvents() (bool, error) {
+func (r *Reader) checkForNewEvents() (bool, error) {
 	c := r.journal.Wait(100 * time.Millisecond)
 	switch c {
 	case sdjournal.SD_JOURNAL_NOP:
