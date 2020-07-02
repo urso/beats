@@ -71,7 +71,7 @@ func BuildMatcher(in string) (Matcher, error) {
 	return defaultBuilder.Build(in)
 }
 
-// IsValue returns true if the matcher was initialized correctly.
+// IsValid returns true if the matcher was initialized correctly.
 func (m Matcher) IsValid() bool { return m.str != "" }
 
 // String returns the string representation of the field match.
