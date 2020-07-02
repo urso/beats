@@ -31,7 +31,7 @@ type FieldConversion map[string]Conversion
 
 // Conversion configures the conversion rules for a field.
 type Conversion struct {
-	Name      string
+	Names     []string
 	IsInteger bool
 	Dropped   bool
 }
@@ -74,7 +74,9 @@ func (c *Converter) Convert(entryFields map[string]string) common.MapStr {
 				value = v
 				c.log.Debugf("Journald mapping error: %v", err)
 			}
-			fields.Put(fieldConversionInfo.Name, value)
+			for _, name := range fieldConversionInfo.Names {
+				fields.Put(name, value)
+			}
 		}
 	}
 
@@ -96,7 +98,7 @@ func convertValue(fc Conversion, value string) (interface{}, error) {
 			s := strings.Split(value, ",")
 			v, err = strconv.ParseInt(s[0], 10, 64)
 			if err != nil {
-				return value, fmt.Errorf("failed to convert field %s \"%v\" to int: %v", fc.Name, value, err)
+				return value, fmt.Errorf("failed to convert field %s \"%v\" to int: %v", fc.Names[0], value, err)
 			}
 		}
 		return v, nil
@@ -108,10 +110,10 @@ func convertValue(fc Conversion, value string) (interface{}, error) {
 
 var ignoredField = Conversion{Dropped: true}
 
-func text(name string) Conversion {
-	return Conversion{Name: name, IsInteger: false, Dropped: false}
+func text(names ...string) Conversion {
+	return Conversion{Names: names, IsInteger: false, Dropped: false}
 }
 
-func integer(name string) Conversion {
-	return Conversion{Name: name, IsInteger: true, Dropped: false}
+func integer(names ...string) Conversion {
+	return Conversion{Names: names, IsInteger: true, Dropped: false}
 }

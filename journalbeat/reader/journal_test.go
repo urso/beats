@@ -20,64 +20,51 @@
 package reader
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/elastic/beats/v7/journalbeat/checkpoint"
-	"github.com/elastic/beats/v7/journalbeat/cmd/instance"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
-type ToEventTestCase struct {
-	entry          sdjournal.JournalEntry
-	expectedFields common.MapStr
-}
-
-type SetupMatchesTestCase struct {
-	matches     []string
-	expectError bool
-}
-
 func TestToEvent(t *testing.T) {
-	tests := []ToEventTestCase{
-		// field name from fields.go
-		ToEventTestCase{
+	tests := map[string]struct {
+		entry sdjournal.JournalEntry
+		want  common.MapStr
+	}{
+		"field name from fields.go": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					sdjournal.SD_JOURNAL_FIELD_BOOT_ID: "123456",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"host": common.MapStr{
 					"boot_id": "123456",
 				},
 			},
 		},
-		// 'syslog.pid' field without user append
-		ToEventTestCase{
+		"'syslog.pid' field without user append": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					sdjournal.SD_JOURNAL_FIELD_SYSLOG_PID: "123456",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"syslog": common.MapStr{
 					"pid": int64(123456),
 				},
 			},
 		},
-		// 'syslog.priority' field with junk
-		ToEventTestCase{
+		"'syslog.priority' field with junk": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					sdjournal.SD_JOURNAL_FIELD_PRIORITY: "123456, ",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"syslog": common.MapStr{
 					"priority": int64(123456),
 				},
@@ -88,40 +75,37 @@ func TestToEvent(t *testing.T) {
 				},
 			},
 		},
-		// 'syslog.pid' field with user append
-		ToEventTestCase{
+		"'syslog.pid' field with user append": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					sdjournal.SD_JOURNAL_FIELD_SYSLOG_PID: "123456,root",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"syslog": common.MapStr{
 					"pid": int64(123456),
 				},
 			},
 		},
-		// 'syslog.pid' field empty
-		ToEventTestCase{
+		"'syslog.pid' field empty": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					sdjournal.SD_JOURNAL_FIELD_SYSLOG_PID: "",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"syslog": common.MapStr{
 					"pid": "",
 				},
 			},
 		},
-		// custom field
-		ToEventTestCase{
+		"custom field": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					"my_custom_field": "value",
 				},
 			},
-			expectedFields: common.MapStr{
+			want: common.MapStr{
 				"journald": common.MapStr{
 					"custom": common.MapStr{
 						"my_custom_field": "value",
@@ -129,56 +113,22 @@ func TestToEvent(t *testing.T) {
 				},
 			},
 		},
-		// dropped field
-		ToEventTestCase{
+		"dropped field": {
 			entry: sdjournal.JournalEntry{
 				Fields: map[string]string{
 					"_SOURCE_MONOTONIC_TIMESTAMP": "value",
 				},
 			},
-			expectedFields: common.MapStr{},
+			want: common.MapStr{},
 		},
 	}
 
-	instance.SetupJournalMetrics()
-	r, err := NewLocal(Config{Path: "dummy.journal"}, nil, checkpoint.JournalState{}, logp.NewLogger("test"))
-	if err != nil {
-		t.Fatalf("error creating test journal: %v", err)
-	}
-	for _, test := range tests {
-		event := r.toEvent(&test.entry)
-		event.Fields.Delete("event")
-		assert.True(t, reflect.DeepEqual(event.Fields, test.expectedFields))
-	}
-}
-
-func TestSetupMatches(t *testing.T) {
-	tests := []SetupMatchesTestCase{
-		// correct filter expression
-		SetupMatchesTestCase{
-			matches:     []string{"systemd.unit=nginx"},
-			expectError: false,
-		},
-		// custom field
-		SetupMatchesTestCase{
-			matches:     []string{"_MY_CUSTOM_FIELD=value"},
-			expectError: false,
-		},
-		// incorrect separator
-		SetupMatchesTestCase{
-			matches:     []string{"systemd.unit~nginx"},
-			expectError: true,
-		},
-	}
-	journal, err := sdjournal.NewJournal()
-	if err != nil {
-		t.Fatalf("error while creating test journal: %v", err)
-	}
-
-	for _, test := range tests {
-		err = setupMatches(journal, test.matches)
-		if err != nil && !test.expectError {
-			t.Errorf("unexpected outcome of setupMatches: error: '%v', expected error: %v", err, test.expectError)
-		}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			log := logp.NewLogger("test")
+			event := toEvent(log, "", &test.entry, false)
+			event.Fields.Delete("event")
+			assert.Equal(t, test.want, event.Fields)
+		})
 	}
 }

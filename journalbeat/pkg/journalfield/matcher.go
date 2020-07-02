@@ -57,8 +57,10 @@ func (b MatcherBuilder) Build(in string) (Matcher, error) {
 	}
 
 	for journalKey, eventField := range conversions {
-		if elems[0] == eventField.Name {
-			return Matcher{journalKey + "=" + elems[1]}, nil
+		for _, name := range eventField.Names {
+			if elems[0] == name {
+				return Matcher{journalKey + "=" + elems[1]}, nil
+			}
 		}
 	}
 

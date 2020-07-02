@@ -40,7 +40,7 @@ var journaldEventFields = FieldConversion{
 	"_KERNEL_SUBSYSTEM":        text("journald.kernel.subsystem"),
 	"_SYSTEMD_INVOCATION_ID":   text("systemd.invocation_id"),
 	"_SYSTEMD_USER_SLICE":      text("systemd.user_slice"),
-	"_UDEV_DEVLINK":            text("journald.kernel.device_symlinks"), // TODO aggregate multiple elements
+	"_UDEV_DEVLINK":            text("journald.kernel.device_symlinks"),
 	"_UDEV_DEVNODE":            text("journald.kernel.device_node_path"),
 	"_UDEV_SYSNAME":            text("journald.kernel.device_name"),
 }

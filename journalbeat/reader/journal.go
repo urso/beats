@@ -96,6 +96,12 @@ func seekBy(log *logp.Logger, c Config, state checkpoint.JournalState) (journalr
 	return mode, state.Cursor
 }
 
+// Close closes the underlying journal reader.
+func (r *Reader) Close() {
+	instance.StopMonitoringJournal(r.config.Path)
+	r.r.Close()
+}
+
 // Next waits until a new event shows up and returns it.
 // It blocks until an event is returned or an error occurs.
 func (r *Reader) Next() (*beat.Event, error) {
@@ -103,18 +109,20 @@ func (r *Reader) Next() (*beat.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	return r.toEvent(entry), nil
+
+	event := toEvent(r.logger, r.config.CheckpointID, entry, r.config.SaveRemoteHostname)
+	return event, nil
 }
 
 // toEvent creates a beat.Event from journal entries.
-func (r *Reader) toEvent(entry *sdjournal.JournalEntry) *beat.Event {
+func toEvent(logger *logp.Logger, id string, entry *sdjournal.JournalEntry, saveRemoteHostname bool) *beat.Event {
 	created := time.Now()
-	fields := journalfield.NewConverter(r.logger, nil).Convert(entry.Fields)
+	fields := journalfield.NewConverter(logger, nil).Convert(entry.Fields)
 	fields.Put("event.kind", "event")
 
 	// if entry is coming from a remote journal, add_host_metadata overwrites the source hostname, so it
 	// has to be copied to a different field
-	if r.config.SaveRemoteHostname {
+	if saveRemoteHostname {
 		remoteHostname, err := fields.GetValue("host.hostname")
 		if err == nil {
 			fields.Put("log.source.address", remoteHostname)
@@ -122,7 +130,7 @@ func (r *Reader) toEvent(entry *sdjournal.JournalEntry) *beat.Event {
 	}
 
 	state := checkpoint.JournalState{
-		Path:               r.config.CheckpointID,
+		Path:               id,
 		Cursor:             entry.Cursor,
 		RealtimeTimestamp:  entry.RealtimeTimestamp,
 		MonotonicTimestamp: entry.MonotonicTimestamp,
@@ -137,10 +145,4 @@ func (r *Reader) toEvent(entry *sdjournal.JournalEntry) *beat.Event {
 		Private:   state,
 	}
 	return &event
-}
-
-// Close closes the underlying journal reader.
-func (r *Reader) Close() {
-	instance.StopMonitoringJournal(r.config.Path)
-	r.r.Close()
 }
