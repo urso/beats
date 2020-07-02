@@ -104,7 +104,7 @@ func (inp *managedInput) Run(
 	pipeline beat.PipelineConnector,
 ) (err error) {
 	// Setup cancellation using a custom cancel context. All workers will be
-	// stopped if one failed badly.
+	// stopped if one failed badly by returning an error.
 	cancelCtx, cancel := context.WithCancel(ctxtool.FromCanceller(ctx.Cancelation))
 	defer cancel()
 	ctx.Cancelation = cancelCtx
@@ -126,7 +126,7 @@ func (inp *managedInput) Run(
 	}
 
 	if errs := grp.Wait(); len(errs) > 0 {
-		return sderr.WrapAll(errs, "input %v failed", ctx.ID)
+		return sderr.WrapAll(errs, "input %{id} failed", ctx.ID)
 	}
 	return nil
 }
@@ -137,7 +137,6 @@ func (inp *managedInput) runSource(
 	source Source,
 	pipeline beat.PipelineConnector,
 ) (err error) {
-	// Setup error recovery/reporting
 	defer func() {
 		if v := recover(); v != nil {
 			err = fmt.Errorf("input panic with: %+v\n%s", v, debug.Stack())
@@ -145,7 +144,6 @@ func (inp *managedInput) runSource(
 		}
 	}()
 
-	// connect to libbeat publisher pipeline
 	client, err := pipeline.ConnectWith(beat.ClientConfig{
 		CloseRef:   ctx.Cancelation,
 		ACKHandler: newInputACKHandler(ctx.Logger),
@@ -155,7 +153,6 @@ func (inp *managedInput) runSource(
 	}
 	defer client.Close()
 
-	// lock resource for exclusive access and create cursor
 	resourceKey := inp.createSourceID(source)
 	resource, err := inp.manager.lock(ctx, resourceKey)
 	if err != nil {
@@ -163,10 +160,8 @@ func (inp *managedInput) runSource(
 	}
 	defer releaseResource(resource)
 
-	// Ensure we use the correct TTL by updating it now. If the resource is 'new' we will insert it into the registry now.
 	store.UpdateTTL(resource, inp.cleanTimeout)
 
-	// start the collection
 	cursor := makeCursor(store, resource)
 	publisher := &cursorPublisher{canceler: ctx.Cancelation, client: client, cursor: &cursor}
 	return inp.input.Run(ctx, source, cursor, publisher)
