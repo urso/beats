@@ -3,8 +3,6 @@ package journalfield
 import (
 	"fmt"
 	"strings"
-
-	"github.com/coreos/go-systemd/v22/sdjournal"
 )
 
 type Matcher struct {
@@ -13,6 +11,11 @@ type Matcher struct {
 
 type MatcherBuilder struct {
 	Conversions map[string]Conversion
+}
+
+type journal interface {
+	AddMatch(string) error
+	AddDisjunction() error
 }
 
 var defaultBuilder = MatcherBuilder{Conversions: journaldEventFields}
@@ -46,7 +49,7 @@ func (m Matcher) IsValid() bool { return m.str != "" }
 
 func (m Matcher) String() string { return m.str }
 
-func (m Matcher) Apply(j *sdjournal.Journal) error {
+func (m Matcher) Apply(j journal) error {
 	if !m.IsValid() {
 		return fmt.Errorf("can not apply invalid matcher to a journal")
 	}
@@ -67,7 +70,7 @@ func (m *Matcher) Unpack(value string) error {
 	return nil
 }
 
-func ApplyMatchersOr(j *sdjournal.Journal, matchers []Matcher) error {
+func ApplyMatchersOr(j journal, matchers []Matcher) error {
 	for _, m := range matchers {
 		if err := m.Apply(j); err != nil {
 			return err

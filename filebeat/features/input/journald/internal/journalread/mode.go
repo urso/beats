@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// SeekMode is used by (*Reader).Seek to decide where to advance the read pointer to.
 type SeekMode uint
 
 const (
@@ -26,7 +27,8 @@ var seekModes = map[string]SeekMode{
 
 var errInvalidSeekFallback = errors.New("invalid setting for cursor_seek_fallback")
 
-// Unpack validates and unpack "seek" config option
+// Unpack validates and unpack "seek" config options. It returns an error if
+// the string is no valid seek mode.
 func (m *SeekMode) Unpack(value string) error {
 	mode, ok := seekModes[value]
 	if !ok {

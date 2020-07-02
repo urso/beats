@@ -3,6 +3,7 @@ package journalfield
 import "github.com/coreos/go-systemd/v22/sdjournal"
 
 var (
+	// journaldEventFields provides default field mappings and conversions rules.
 	journaldEventFields = FieldConversion{
 		// provided by systemd journal
 		"COREDUMP_UNIT":                              text("journald.coredump.unit"),
@@ -62,14 +63,14 @@ var (
 		"CONTAINER_PARTIAL_MESSAGE": text("container.partial"),
 
 		// dropped fields
-		sdjournal.SD_JOURNAL_FIELD_MONOTONIC_TIMESTAMP:       ignoreField, // saved in the registry
-		sdjournal.SD_JOURNAL_FIELD_SOURCE_REALTIME_TIMESTAMP: ignoreField, // saved in the registry
-		sdjournal.SD_JOURNAL_FIELD_CURSOR:                    ignoreField, // saved in the registry
-		"_SOURCE_MONOTONIC_TIMESTAMP":                        ignoreField, // received timestamp stored in @timestamp
+		sdjournal.SD_JOURNAL_FIELD_MONOTONIC_TIMESTAMP:       ignoredField, // saved in the registry
+		sdjournal.SD_JOURNAL_FIELD_SOURCE_REALTIME_TIMESTAMP: ignoredField, // saved in the registry
+		sdjournal.SD_JOURNAL_FIELD_CURSOR:                    ignoredField, // saved in the registry
+		"_SOURCE_MONOTONIC_TIMESTAMP":                        ignoredField, // received timestamp stored in @timestamp
 	}
 )
 
-var ignoreField = Conversion{Dropped: true}
+var ignoredField = Conversion{Dropped: true}
 
 func text(name string) Conversion {
 	return Conversion{Name: name, IsInteger: false, Dropped: false}

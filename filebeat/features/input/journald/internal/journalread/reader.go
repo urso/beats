@@ -35,19 +35,41 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
+// Reader implements a Journald base reader with backoff support. The reader
+// will block until a new entry can be read from the journal.
 type Reader struct {
 	log     *logp.Logger
-	journal *sdjournal.Journal
 	backoff backoff.Backoff
+	journal journal
+}
+
+type journal interface {
+	Close() error
+
+	Next() (uint64, error)
+	Wait(time.Duration) int
+	GetEntry() (*sdjournal.JournalEntry, error)
+
+	SeekHead() error
+	SeekTail() error
+	SeekCursor(string) error
 }
 
 // LocalSystemJournalID is the ID of the local system journal.
 const localSystemJournalID = "LOCAL_SYSTEM_JOURNAL"
 
-func NewReader(log *logp.Logger, journal *sdjournal.Journal, backoff backoff.Backoff) *Reader {
+// NewReader creates a new Reader for an already opened journal. The reader assumed to take
+// ownership of the journal, and needs to be closed.
+func NewReader(log *logp.Logger, journal journal, backoff backoff.Backoff) *Reader {
 	return &Reader{log: log, journal: journal, backoff: backoff}
 }
 
+// Open opens a journal and creates a reader for it.
+// Additonal settings can be applied to the journal by passing functions to with.
+// Open returns an error if the journal can not be opened, or if one with-function failed.
+//
+// Open will opend the systems journal if the path is empty or matches LOCAL_SYSTEM_JOURNAL.
+// The path can optionally point to a file or a directory.
 func Open(log *logp.Logger, path string, backoff backoff.Backoff, with ...func(j *sdjournal.Journal) error) (*Reader, error) {
 	j, err := openJournal(path)
 	if err != nil {
@@ -96,10 +118,14 @@ func openJournal(path string) (*sdjournal.Journal, error) {
 	return j, err
 }
 
+// Close closes the journal.
 func (r *Reader) Close() error {
 	return r.journal.Close()
 }
 
+// Seek moves the read pointer to a new position.
+// If a cursor or SeekTail is given, Seek tries to ignore the entry at the
+// given position, jumping right to the next entry.
 func (r *Reader) Seek(mode SeekMode, cursor string) (err error) {
 	switch mode {
 	case SeekHead:
@@ -118,6 +144,8 @@ func (r *Reader) Seek(mode SeekMode, cursor string) (err error) {
 	return err
 }
 
+// Next reads a new journald entry from the journal. It blocks if there is
+// currently no entry available in the journal, or until an error has occured.
 func (r *Reader) Next(cancel input.Canceler) (*sdjournal.JournalEntry, error) {
 	for cancel.Err() == nil {
 		c, err := r.journal.Next()

@@ -9,19 +9,25 @@ import (
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
 
+// FieldConversion provides the mappings and conversion rules for raw fields of journald entries.
 type FieldConversion map[string]Conversion
 
+// Conversion configures the conversion rules for a field.
 type Conversion struct {
 	Name      string
 	IsInteger bool
 	Dropped   bool
 }
 
+// Converter applis configured conversion rules to journald entries, producing
+// a new common.MapStr.
 type Converter struct {
 	log         *logp.Logger
 	conversions FieldConversion
 }
 
+// NewConverter creates a new Converter from the given conversion rules. If
+// conversions is nil, internal default conversion rules will be applied.
 func NewConverter(log *logp.Logger, conversions FieldConversion) *Converter {
 	if conversions == nil {
 		conversions = journaldEventFields
@@ -30,6 +36,10 @@ func NewConverter(log *logp.Logger, conversions FieldConversion) *Converter {
 	return &Converter{log: log, conversions: conversions}
 }
 
+// Convert creates a common.MapStr from the raw fields by applying the
+// configured conversion rules.
+// Field type conversion errors are logged to at debug level and the original
+// value is added to the map.
 func (c *Converter) Convert(entryFields map[string]string) common.MapStr {
 	fields := common.MapStr{}
 	var custom common.MapStr
