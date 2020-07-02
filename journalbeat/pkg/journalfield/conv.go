@@ -86,3 +86,15 @@ func convertValue(fc Conversion, value string) (interface{}, error) {
 	}
 	return value, nil
 }
+
+// helpers for creating a field conversion table.
+
+var ignoredField = Conversion{Dropped: true}
+
+func text(name string) Conversion {
+	return Conversion{Name: name, IsInteger: false, Dropped: false}
+}
+
+func integer(name string) Conversion {
+	return Conversion{Name: name, IsInteger: true, Dropped: false}
+}

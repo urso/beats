@@ -23,8 +23,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalfield"
-	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalread"
+	"github.com/elastic/beats/v7/journalbeat/pkg/journalfield"
+	"github.com/elastic/beats/v7/journalbeat/pkg/journalread"
 )
 
 // Config stores the options of a journald input.

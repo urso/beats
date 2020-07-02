@@ -20,7 +20,7 @@ package journald
 import (
 	"time"
 
-	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalfield"
+	"github.com/elastic/beats/v7/journalbeat/pkg/journalfield"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/logp"
 )
@@ -34,6 +34,7 @@ func eventFromFields(
 	created := time.Now()
 	c := journalfield.NewConverter(log, nil)
 	fields := c.Convert(entryFields)
+	fields.Put("event.kind", "event")
 
 	// if entry is coming from a remote journal, add_host_metadata overwrites the source hostname, so it
 	// has to be copied to a different field

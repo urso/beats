@@ -25,10 +25,10 @@ import (
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/urso/sderr"
 
-	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalfield"
-	"github.com/elastic/beats/v7/filebeat/features/input/journald/internal/journalread"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
 	cursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
+	"github.com/elastic/beats/v7/journalbeat/pkg/journalfield"
+	"github.com/elastic/beats/v7/journalbeat/pkg/journalread"
 	"github.com/elastic/beats/v7/libbeat/common"
 	"github.com/elastic/beats/v7/libbeat/common/backoff"
 	"github.com/elastic/beats/v7/libbeat/feature"
