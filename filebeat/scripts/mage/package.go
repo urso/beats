@@ -18,6 +18,8 @@
 package mage
 
 import (
+	"strings"
+
 	"github.com/magefile/mage/mg"
 	"github.com/pkg/errors"
 
@@ -27,6 +29,21 @@ import (
 const (
 	dirModuleGenerated   = "build/package/module"
 	dirModulesDGenerated = "build/package/modules.d"
+)
+
+// declare journald dependencies for cross build target
+var (
+	journaldPlatforms = []devtools.PlatformDescription{
+		devtools.Linux386, devtools.LinuxAMD64,
+		devtools.LinuxARM64, devtools.LinuxARM5, devtools.LinuxARM6, devtools.LinuxARM7,
+		devtools.LinuxMIPS, devtools.LinuxMIPSLE, devtools.LinuxMIPS64LE,
+		devtools.LinuxPPC64LE,
+		devtools.LinuxS390x,
+	}
+
+	journaldDeps = devtools.NewPackageInstaller().
+			AddEach(journaldPlatforms, "libsystemd-dev").
+			Add(devtools.Linux386, "libsystemd0", "libgcrypt20")
 )
 
 // CustomizePackaging modifies the package specs to add the modules and
@@ -117,4 +134,53 @@ func prepareModulePackaging(files ...struct{ Src, Dst string }) error {
 		}
 	}
 	return nil
+}
+
+// GolangCrossBuild build the Beat binary inside of the golang-builder.
+// Do not use directly, use crossBuild instead.
+func GolangCrossBuild() error {
+	mg.Deps(BuildDepsInstaller(devtools.Platform.Name))
+	return devtools.GolangCrossBuild(devtools.DefaultGolangCrossBuildArgs())
+}
+
+func CrossBuildXPack() error {
+	return devtools.CrossBuildXPack(devtools.ImageSelector(SelectCrossBuildImage))
+}
+
+// CrossBuild cross-builds the beat for all target platforms.
+func CrossBuild() error {
+	return devtools.CrossBuild(devtools.ImageSelector(SelectCrossBuildImage))
+}
+
+// CrossBuildGoDaemon cross-builds the go-daemon binary using Docker.
+func CrossBuildGoDaemon() error {
+	return devtools.CrossBuildGoDaemon(devtools.ImageSelector(SelectCrossBuildImage))
+}
+
+func BuildDepsInstaller(platform string) func() error {
+	return journaldDeps.Installer(platform)
+}
+
+func SelectCrossBuildImage(platform string) (string, error) {
+	tagSuffix := "main"
+
+	switch {
+	case strings.HasPrefix(platform, "linux/arm"):
+		tagSuffix = "arm"
+	case strings.HasPrefix(platform, "linux/mips"):
+		tagSuffix = "mips"
+	case strings.HasPrefix(platform, "linux/ppc"):
+		tagSuffix = "ppc"
+	case platform == "linux/s390x":
+		tagSuffix = "s390x"
+	case strings.HasPrefix(platform, "linux"):
+		tagSuffix = "main-debian8"
+	}
+
+	goVersion, err := devtools.GoVersion()
+	if err != nil {
+		return "", err
+	}
+
+	return devtools.BeatsCrossBuildImage + ":" + goVersion + "-" + tagSuffix, nil
 }

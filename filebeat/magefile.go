@@ -22,6 +22,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/magefile/mage/mg"
@@ -69,10 +70,7 @@ func Build() error {
 // GolangCrossBuild build the Beat binary inside of the golang-builder.
 // Do not use directly, use crossBuild instead.
 func GolangCrossBuild() error {
-	// XXX: enable once we have systemd available in the cross build image
-	// mg.Deps(journaldDeps.Installer(devtools.Platform.Name))
-
-	return devtools.GolangCrossBuild(devtools.DefaultGolangCrossBuildArgs())
+	return filebeat.GolangCrossBuild()
 }
 
 // BuildGoDaemon builds the go-daemon binary (use crossBuildGoDaemon).
@@ -80,14 +78,19 @@ func BuildGoDaemon() error {
 	return devtools.BuildGoDaemon()
 }
 
+// CrossBuildXPack cross-builds the beat with XPack for all target platforms.
+func CrossBuildXPack() error {
+	return filebeat.CrossBuildXPack()
+}
+
 // CrossBuild cross-builds the beat for all target platforms.
 func CrossBuild() error {
-	return devtools.CrossBuild()
+	return filebeat.CrossBuild()
 }
 
 // CrossBuildGoDaemon cross-builds the go-daemon binary using Docker.
 func CrossBuildGoDaemon() error {
-	return devtools.CrossBuildGoDaemon()
+	return filebeat.CrossBuildGoDaemon()
 }
 
 // Package packages the Beat for distribution.
@@ -228,4 +231,28 @@ func PythonIntegTest(ctx context.Context) error {
 		args.Env["MODULES_PATH"] = devtools.CWD("module")
 		return devtools.PythonNoseTest(args)
 	})
+}
+
+func selectImage(platform string) (string, error) {
+	tagSuffix := "main"
+
+	switch {
+	case strings.HasPrefix(platform, "linux/arm"):
+		tagSuffix = "arm"
+	case strings.HasPrefix(platform, "linux/mips"):
+		tagSuffix = "mips"
+	case strings.HasPrefix(platform, "linux/ppc"):
+		tagSuffix = "ppc"
+	case platform == "linux/s390x":
+		tagSuffix = "s390x"
+	case strings.HasPrefix(platform, "linux"):
+		tagSuffix = "main-debian8"
+	}
+
+	goVersion, err := devtools.GoVersion()
+	if err != nil {
+		return "", err
+	}
+
+	return devtools.BeatsCrossBuildImage + ":" + goVersion + "-" + tagSuffix, nil
 }
