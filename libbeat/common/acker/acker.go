@@ -35,10 +35,10 @@ func (nilACKer) AddEvent(event beat.Event, published bool) {}
 func (nilACKer) ACKEvents(n int)                           {}
 func (nilACKer) Close()                                    {}
 
-// Counting reports the number of ACKed events as has been reported by the outputs or queue.
+// RawCounting reports the number of ACKed events as has been reported by the outputs or queue.
 // The ACKer does not keep track of dropped events. Events after the client has
 // been closed will still be reported.
-func Counting(fn func(int)) beat.ACKer {
+func RawCounting(fn func(int)) beat.ACKer {
 	return countACKer(fn)
 }
 
@@ -70,6 +70,14 @@ func TrackingCounter(fn func(acked, total int)) beat.ACKer {
 	a.lst.head = init
 	a.lst.tail = init
 	return a
+}
+
+// Counting returns an ACK count for all events a client has tried to publish.
+// The ACKer keeps track of dropped events as well, and adjusts the ACK from the outputs accordingly.
+func Counting(fn func(n int)) beat.ACKer {
+	return TrackingCounter(func(_ int, total int) {
+		fn(total)
+	})
 }
 
 type trackingACKer struct {
@@ -295,7 +303,7 @@ func (l ackerList) Close() {
 
 // ConnectionOnly ensures that the given ACKer is only used for as long as the
 // pipeline Client is active.  Once the Client is closed, the ACKer will drop
-// it's internal state and no more ACK events will be processed.
+// its internal state and no more ACK events will be processed.
 func ConnectionOnly(a beat.ACKer) beat.ACKer {
 	return &clientOnlyACKer{acker: a}
 }

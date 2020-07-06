@@ -20,8 +20,9 @@ package acker
 import (
 	"testing"
 
-	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elastic/beats/v7/libbeat/beat"
 )
 
 type fakeACKer struct {
@@ -44,7 +45,7 @@ func TestNil(t *testing.T) {
 func TestCounting(t *testing.T) {
 	t.Run("ack count is passed through", func(t *testing.T) {
 		var n int
-		acker := Counting(func(acked int) { n = acked })
+		acker := RawCounting(func(acked int) { n = acked })
 		acker.ACKEvents(3)
 		require.Equal(t, 3, n)
 	})
@@ -208,14 +209,14 @@ func TestCombine(t *testing.T) {
 func TestConnectionOnly(t *testing.T) {
 	t.Run("passes ACKs if not closed", func(t *testing.T) {
 		var n int
-		acker := ConnectionOnly(Counting(func(acked int) { n = acked }))
+		acker := ConnectionOnly(RawCounting(func(acked int) { n = acked }))
 		acker.ACKEvents(3)
 		require.Equal(t, 3, n)
 	})
 
 	t.Run("ignores ACKs after close", func(t *testing.T) {
 		var n int
-		acker := ConnectionOnly(Counting(func(acked int) { n = acked }))
+		acker := ConnectionOnly(RawCounting(func(acked int) { n = acked }))
 		acker.Close()
 		acker.ACKEvents(3)
 		require.Equal(t, 0, n)

@@ -74,17 +74,9 @@ func NewListener(family Family, location string, handlerFactory HandlerFactory, 
 
 // Start listen to the socket.
 func (l *Listener) Start() error {
-	var err error
-	l.Listener, err = l.listenerFactory()
-	if err != nil {
-		return err
-	}
-
 	if err := l.initListen(context.Background()); err != nil {
 		return err
 	}
-
-	l.log.Info("Started listening for " + l.family.String() + " connection")
 
 	l.wg.Add(1)
 	go func() {
@@ -117,16 +109,15 @@ func (l *Listener) initListen(ctx context.Context) error {
 		return err
 	}
 
-	l.ctx, l.cancel = context.WithCancel(ctx)
-	go func() {
-		<-l.ctx.Done()
+	l.ctx, l.cancel = ctxtool.WithFunc(ctx, func() {
 		l.Listener.Close()
-	}()
-	l.log.Info("Started listening for " + l.family.String() + " connection")
+	})
 	return nil
 }
 
 func (l *Listener) run() {
+	l.log.Info("Started listening for " + l.family.String() + " connection")
+
 	for {
 		conn, err := l.Listener.Accept()
 		if err != nil {
