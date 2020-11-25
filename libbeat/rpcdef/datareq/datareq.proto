@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package libbeat.rpcdef.datareq;
+
+option go_package = "github.com/elastic/beats/libbeat/rpcdef/datareq";
+
+import "google/protobuf/struct.proto";
+
+// Notes:
+//  - encoding uses fixes length encodings.
+
+service DataService {
+  rpc PublishBulk(EventPublishRequest) returns (stream EventPublishResponse) {}
+	rpc PublishStream(stream Event) returns (stream EventPublishResponse) {}
+}
+
+message EventPublishRequest {
+  repeated Event events = 1;
+}
+
+message EventPublishResponse {
+  // TODO: array of per event status?
+
+  uint64 acked = 1; // regularly reports progress on current batch
+}
+
+message Event {
+  Timestamp timestamp = 1;
+  Object meta = 2;
+  Object fields = 3;
+}
+
+message Object {
+  map<string, Value> fields = 1;
+}
+
+message Array {
+  repeated Value values = 1;
+}
+
+
+// similar to google.protobuf.Value, but with alternative 
+message Value {
+  oneof kind {
+    // primitive types
+    google.protobuf.NullValue null_value = 1;
+    string string_value = 2;
+    bool bool_value = 3;
+    sint64 int_value = 4;
+    fixed64 uint_value = 5;
+    double double_value = 6;
+
+    // compound types
+    Object object_value = 21;
+    Array array_value = 22;
+
+    // custom primitive types
+    Timestamp timestamp_value = 101;
+  }
+}
+
+message Timestamp {
+  fixed64 sec = 1;
+  fixed32 nsec = 2;
+  uint32 timezone_offset = 3; // variable length encoding. Offsets are rather small and don't need full 32bit
+}

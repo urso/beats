@@ -19,7 +19,10 @@ package inputs
 
 import (
 	"github.com/elastic/beats/v7/filebeat/beater"
+	"github.com/elastic/beats/v7/filebeat/input/esbulk"
 	"github.com/elastic/beats/v7/filebeat/input/filestream"
+	"github.com/elastic/beats/v7/filebeat/input/grpcevt"
+	"github.com/elastic/beats/v7/filebeat/input/lumberjack"
 	"github.com/elastic/beats/v7/filebeat/input/unix"
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
@@ -28,14 +31,17 @@ import (
 
 func Init(info beat.Info, log *logp.Logger, components beater.StateStore) []v2.Plugin {
 	return append(
-		genericInputs(log, components),
+		genericInputs(info, log, components),
 		osInputs(info, log, components)...,
 	)
 }
 
-func genericInputs(log *logp.Logger, components beater.StateStore) []v2.Plugin {
+func genericInputs(info beat.Info, log *logp.Logger, components beater.StateStore) []v2.Plugin {
 	return []v2.Plugin{
 		filestream.Plugin(log, components),
 		unix.Plugin(),
+		esbulk.Plugin(info),
+		lumberjack.Plugin(),
+		grpcevt.Plugin(),
 	}
 }
