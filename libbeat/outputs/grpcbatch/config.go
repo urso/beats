@@ -10,6 +10,8 @@ type settings struct {
 	BulkMaxSize int           `config:"bulk_max_size"`
 	Timeout     time.Duration `config:"timeout"`
 	Backoff     backoff       `config:"backoff"`
+	Compression int           `config:"compression"`
+	Codec       string        `config:"codec"`
 }
 
 type backoff struct {

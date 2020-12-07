@@ -5,6 +5,7 @@ import (
 
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common"
+	"github.com/elastic/beats/v7/libbeat/outputs/codec/cbor"
 	"github.com/elastic/beats/v7/libbeat/rpcdef/datareq"
 )
 
@@ -21,6 +22,18 @@ func encodeEvent(event *beat.Event) (*datareq.Event, error) {
 		Fields:    encMapStr(event.Fields),
 	}
 	return rpcEvent, nil
+}
+
+func encodeEventCBOR(enc *cbor.Encoder, event *beat.Event) (*datareq.RawEvent, error) {
+	raw, err := enc.Encode("", event)
+	if err != nil {
+		return nil, err
+	}
+
+	tmp := make([]byte, len(raw))
+	copy(tmp, raw)
+
+	return &datareq.RawEvent{Data: tmp}, nil
 }
 
 func encTimestamp(ts time.Time) *datareq.Timestamp {

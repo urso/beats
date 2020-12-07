@@ -1,11 +1,15 @@
 package grpcevt
 
 import (
+	"sync"
+
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common/acker"
 )
 
 type batchACKHandler struct {
+	closeOnce sync.Once
+
 	breaker chan struct{} // short circuite ACK handling so we do not block on ch
 	ch      chan int
 
@@ -36,6 +40,12 @@ func newBatchACKHandler() *batchACKHandler {
 		ch:      make(chan int, 1),
 		breaker: make(chan struct{}),
 	}
+}
+
+func (b *batchACKHandler) cancel() {
+	b.closeOnce.Do(func() {
+		close(b.breaker)
+	})
 }
 
 func (b *batchACKHandler) startRecording() {

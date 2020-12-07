@@ -11,7 +11,10 @@ import "google/protobuf/struct.proto";
 
 service DataService {
   rpc PublishBulk(EventPublishRequest) returns (stream EventPublishResponse) {}
-	rpc PublishStream(stream Event) returns (stream EventPublishResponse) {}
+	rpc PublishBulkCBOR(RawEventBatch) returns (stream EventPublishResponse) {}
+
+  rpc PublishStream(stream Event) returns (stream EventPublishResponse) {}
+  rpc PublishStreamCBOR(stream RawEvent) returns (stream EventPublishResponse) {}
 }
 
 message EventPublishRequest {
@@ -22,6 +25,14 @@ message EventPublishResponse {
   // TODO: array of per event status?
 
   uint64 acked = 1; // regularly reports progress on current batch
+}
+
+message RawEventBatch {
+  repeated bytes Events = 1;
+}
+
+message RawEvent {
+  bytes data = 3;
 }
 
 message Event {

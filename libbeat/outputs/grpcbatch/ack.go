@@ -24,10 +24,12 @@ func (r *batchRef) dec() {
 	err := r.err
 	if err == nil {
 		r.batch.ACK()
+		r.stats.Acked(len(r.batch.Events()))
 		return
 	}
 
 	r.logger.Errorf("Failed to publish %v events: %v", len(r.batch.Events()), err)
+	r.stats.Failed(len(r.batch.Events()))
 	r.batch.Retry()
 }
 

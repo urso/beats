@@ -13,6 +13,8 @@ import (
 	"github.com/elastic/go-concert/ctxtool"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+
+	_ "google.golang.org/grpc/encoding/gzip"
 )
 
 type grpcInput struct {
@@ -103,7 +105,64 @@ func (g *grpcHandler) PublishBulk(req *datareq.EventPublishRequest, stream datar
 		case <-ticker.C:
 			err := stream.Send(&datareq.EventPublishResponse{Acked: uint64(acked)})
 			if err != nil {
-				close(ackHandler.breaker)
+				ackHandler.cancel()
+				g.logger.Errorf("Failed to send bulk activity signal to client: %v", err)
+				return err
+			}
+		case n := <-ackHandler.ch:
+			acked += n
+		}
+
+		if acked == total {
+			break
+		}
+	}
+
+	err := stream.Send(&datareq.EventPublishResponse{Acked: uint64(acked)})
+	if err != nil {
+		g.logger.Errorf("Failed to send final bulk ACK to client: %v", err)
+	}
+
+	return nil
+}
+
+func (g *grpcHandler) PublishBulkCBOR(req *datareq.RawEventBatch, stream datareq.DataService_PublishBulkCBORServer) error {
+	ackHandler := newBatchACKHandler()
+	g.logger.Debugf("GRPC Bulk request received: %v", len(req.Events))
+
+	go func() {
+		decoder := newDecoder()
+		for _, rpcEvent := range req.Events {
+			// stop publishing in case we detected an IO error in the response stream
+			select {
+			case <-ackHandler.breaker:
+				return
+			default:
+			}
+
+			event, err := decoder.DecodeBytes(rpcEvent)
+			if err != nil {
+				decoder = newDecoder()
+				g.logger.Errorf("Failed to decode event: %v\n %v", err, rpcEvent)
+				panic("oops")
+			}
+
+			event.Private = ackHandler
+			g.client.Publish(event)
+		}
+	}()
+
+	ticker := time.NewTicker(g.reqKeepalive)
+	defer ticker.Stop()
+
+	total := len(req.Events)
+	var acked int
+	for {
+		select {
+		case <-ticker.C:
+			err := stream.Send(&datareq.EventPublishResponse{Acked: uint64(acked)})
+			if err != nil {
+				ackHandler.cancel()
 				g.logger.Errorf("Failed to send bulk activity signal to client: %v", err)
 				return err
 			}
@@ -142,7 +201,7 @@ func (g *grpcHandler) PublishStream(stream datareq.DataService_PublishStreamServ
 			}
 			if err != nil {
 				cancel()
-				close(ackHandler.breaker)
+				ackHandler.cancel()
 				return err // connection/network problem. Let's shutdown with error
 			}
 
@@ -201,7 +260,101 @@ func (g *grpcHandler) PublishStream(stream datareq.DataService_PublishStreamServ
 
 			if err != nil { // receiving io.EOF means that the client did close the connection. In that case we must stop accepting any new events.
 				cancel()
-				close(ackHandler.breaker)
+				ackHandler.cancel()
+				return err // connection/network problem. Let's shutdown with error
+			}
+		}
+		return nil
+	})
+
+	return grp.Wait()
+}
+
+func (g *grpcHandler) PublishStreamCBOR(stream datareq.DataService_PublishStreamCBORServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+
+	ackHandler := newBatchACKHandler()
+
+	chEvents := make(chan int, 100)
+	grp, ctx := errgroup.WithContext(ctx)
+
+	// event publishing loop
+	grp.Go(func() error {
+		decoder := newDecoder()
+		for ctx.Err() == nil {
+			rpcEvent, err := stream.Recv()
+			if err == io.EOF {
+				return nil // client did close send channel.
+			}
+			if err != nil {
+				cancel()
+				ackHandler.cancel()
+				return err // connection/network problem. Let's shutdown with error
+			}
+
+			if ctx.Err() != nil {
+				break
+			}
+
+			// decoder := newDecoder()
+			event, err := decoder.Decode(rpcEvent)
+			if err != nil {
+				g.logger.Errorf("Decoding failed with: %v", err)
+				panic("oops")
+			}
+
+			event.Private = ackHandler
+			chEvents <- 1
+			g.client.Publish(event)
+		}
+		return nil
+	})
+
+	// ack loop
+	grp.Go(func() error {
+		var activeEvents int
+
+		var ticker *time.Ticker
+		var tickerCh <-chan time.Time
+
+		defer func() {
+			if ticker != nil {
+				ticker.Stop()
+			}
+		}()
+
+		for ctx.Err() == nil {
+			var err error
+
+			select {
+			case <-ctx.Done():
+				return nil
+
+			case n := <-chEvents:
+				if activeEvents == 0 && n > 0 {
+					ticker = time.NewTicker(g.reqKeepalive)
+					tickerCh = ticker.C
+				}
+				activeEvents += n
+
+			case <-tickerCh:
+				err = stream.Send(&datareq.EventPublishResponse{Acked: 0})
+
+			case n := <-ackHandler.ch:
+				activeEvents -= n
+				if activeEvents == 0 {
+					ticker.Stop()
+					ticker = nil
+					tickerCh = nil
+				}
+
+				err = stream.Send(&datareq.EventPublishResponse{Acked: uint64(n)})
+			}
+
+			if err != nil { // receiving io.EOF means that the client did close the connection. In that case we must stop accepting any new events.
+				cancel()
+				ackHandler.cancel()
 				return err // connection/network problem. Let's shutdown with error
 			}
 		}

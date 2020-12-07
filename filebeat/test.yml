@@ -1,0 +1,8 @@
+filebeat.inputs:
+- type: es_bulk
+- type: lumberjack
+- type: grpc
+  address: ":9292"
+
+output.console:
+  pretty: true

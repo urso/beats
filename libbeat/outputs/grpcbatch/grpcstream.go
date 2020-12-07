@@ -3,6 +3,7 @@ package grpcbatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/elastic/beats/v7/libbeat/beat"
@@ -10,6 +11,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/atomic"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/outputs"
+	"github.com/elastic/beats/v7/libbeat/outputs/codec/cbor"
 	"github.com/elastic/beats/v7/libbeat/publisher"
 	"github.com/elastic/beats/v7/libbeat/rpcdef/datareq"
 	"github.com/elastic/go-concert/unison"
@@ -29,13 +31,18 @@ type grpcStreamClient struct {
 	host     string
 	settings settings
 	stats    outputs.Observer
+
+	useCBOR bool
 }
 
 type asyncClient struct {
 	log    *logp.Logger
 	ctx    context.Context
 	cancel context.CancelFunc
-	stream datareq.DataService_PublishStreamClient
+
+	stream     datareq.DataService_PublishStreamClient
+	streamCBOR datareq.DataService_PublishStreamCBORClient
+	encoder    *cbor.Encoder
 
 	wg            unison.SafeWaitGroup
 	finishedClose chan struct{}
@@ -77,8 +84,31 @@ func configureStream(
 }
 
 func newStreamClient(log *logp.Logger, stats outputs.Observer, host string, settings settings) (*grpcStreamClient, error) {
+	codec := settings.Codec
+	if codec == "" {
+		codec = "protobuf"
+	}
+	switch codec {
+	case "protobuf", "cbor":
+	default:
+		return nil, fmt.Errorf("Unsupported codec type: %v", codec)
+	}
+
+	dialOpts := []grpc.DialOption{
+		grpc.WithInsecure(),
+	}
+
+	if settings.Compression != 0 {
+		compressor, err := grpc.NewGZIPCompressorWithLevel(settings.Compression)
+		if err != nil {
+			return nil, err
+		}
+
+		dialOpts = append(dialOpts, grpc.WithCompressor(compressor))
+	}
+
 	// connections are handled in background for us. Let's create one upfront
-	conn, err := grpc.Dial(host, grpc.WithInsecure())
+	conn, err := grpc.Dial(host, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +122,7 @@ func newStreamClient(log *logp.Logger, stats outputs.Observer, host string, sett
 		stats:    stats,
 		host:     host,
 		settings: settings,
+		useCBOR:  codec == "cbor",
 	}, nil
 }
 
@@ -99,17 +130,28 @@ func (g *grpcStreamClient) String() string { return "grcpbatch" }
 
 func (g *grpcStreamClient) Connect() error {
 	streamCtx, cancel := context.WithCancel(context.Background())
-	stream, err := g.client.PublishStream(streamCtx)
+
+	var streamCBOR datareq.DataService_PublishStreamCBORClient
+	var stream datareq.DataService_PublishStreamClient
+
+	var err error
+	if g.useCBOR {
+		streamCBOR, err = g.client.PublishStreamCBOR(streamCtx)
+	} else {
+		stream, err = g.client.PublishStream(streamCtx)
+	}
 	if err != nil {
 		defer cancel()
 		return err
 	}
 
 	client := &asyncClient{
-		log:    g.log,
-		ctx:    streamCtx,
-		cancel: cancel,
-		stream: stream,
+		log:        g.log,
+		ctx:        streamCtx,
+		cancel:     cancel,
+		stream:     stream,
+		streamCBOR: streamCBOR,
+		encoder:    cbor.New("8.0.0"),
 
 		finishedClose: make(chan struct{}),
 
@@ -117,7 +159,11 @@ func (g *grpcStreamClient) Connect() error {
 		chACKs:     make(chan int, 10),
 		chFail:     make(chan error, 1),
 	}
-	go client.recvLoop()
+	if g.useCBOR {
+		go client.recvLoop(streamCBOR)
+	} else {
+		go client.recvLoop(stream)
+	}
 	go client.ackLoop()
 
 	// TODO: set and check headers (handshake like)
@@ -135,6 +181,9 @@ func (g *grpcStreamClient) Close() error {
 	g.streamClient = nil
 	g.mu.Unlock()
 
+	if client == nil {
+		return nil
+	}
 	return client.Close()
 }
 
@@ -143,17 +192,22 @@ func (g *grpcStreamClient) Publish(ctx context.Context, batch publisher.Batch) e
 	client := g.streamClient
 	g.mu.Unlock()
 
+	events := batch.Events()
+	g.stats.NewBatch(len(events))
+
 	if client == nil || client.ctx.Err() != nil {
 		batch.Retry()
+		g.stats.Failed(len(events))
 		return errors.New("client closed")
 	}
 
 	if err := client.wg.Add(1); err != nil {
+		batch.Retry()
+		g.stats.Failed(len(events))
 		return errors.New("client closed")
 	}
 	defer client.wg.Done()
 
-	events := batch.Events()
 	batchSize := len(events)
 
 	batchRef := &batchRef{
@@ -183,29 +237,51 @@ func (g *grpcStreamClient) Publish(ctx context.Context, batch publisher.Batch) e
 func (client *asyncClient) Close() error {
 	client.cancel()
 	client.wg.Wait()
-	close(client.finishedClose)
+	if client.finishedClose != nil {
+		close(client.finishedClose)
+		client.finishedClose = nil
+	}
 	return nil
 }
 
 func (client *asyncClient) Send(event publisher.Event, ref *batchRef) error {
-	rpcEvent, err := encodeEvent(&event.Content)
-	if err != nil {
-		client.log.Debugf("Dropping event due to encoding error: %v", err)
-		ref.dec()
-		return nil
-	}
-
-	if client.ctx.Err() != nil {
-		return client.ctx.Err()
-	}
-
-	err = client.stream.Send(rpcEvent)
-	if err != nil {
+	if err := client.ctx.Err(); err != nil {
 		ref.fail(err)
 		return err
 	}
 
 	client.chSchedule <- ref
+	if client.stream != nil {
+		rpcEvent, err := encodeEvent(&event.Content)
+		if err != nil {
+			client.log.Debugf("Dropping event due to encoding error: %v", err)
+			ref.dec()
+			ref.stats.Dropped(1)
+			return nil
+		}
+
+		err = client.stream.Send(rpcEvent)
+		if err != nil {
+			client.log.Debug("failed to publish event: %v", err)
+			ref.fail(err)
+			return err
+		}
+	} else {
+		rpcEvent, err := encodeEventCBOR(client.encoder, &event.Content)
+		if err != nil {
+			client.log.Debugf("Dropping event due to encoding error: %v", err)
+			ref.dec()
+			return nil
+		}
+
+		err = client.streamCBOR.Send(rpcEvent)
+		if err != nil {
+			client.log.Debug("failed to publish event: %v", err)
+			ref.fail(err)
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -253,9 +329,11 @@ func (client *asyncClient) ackLoop() {
 	}
 }
 
-func (client *asyncClient) recvLoop() {
+func (client *asyncClient) recvLoop(stream interface {
+	Recv() (*datareq.EventPublishResponse, error)
+}) {
 	for client.ctx.Err() == nil {
-		resp, err := client.stream.Recv()
+		resp, err := stream.Recv()
 		if err != nil {
 			client.log.Errorf("GRPC stream broken. Closing connection. Reason: %v", err)
 			client.chFail <- err

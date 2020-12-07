@@ -18,7 +18,9 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataServiceClient interface {
 	PublishBulk(ctx context.Context, in *EventPublishRequest, opts ...grpc.CallOption) (DataService_PublishBulkClient, error)
+	PublishBulkCBOR(ctx context.Context, in *RawEventBatch, opts ...grpc.CallOption) (DataService_PublishBulkCBORClient, error)
 	PublishStream(ctx context.Context, opts ...grpc.CallOption) (DataService_PublishStreamClient, error)
+	PublishStreamCBOR(ctx context.Context, opts ...grpc.CallOption) (DataService_PublishStreamCBORClient, error)
 }
 
 type dataServiceClient struct {
@@ -61,8 +63,40 @@ func (x *dataServicePublishBulkClient) Recv() (*EventPublishResponse, error) {
 	return m, nil
 }
 
+func (c *dataServiceClient) PublishBulkCBOR(ctx context.Context, in *RawEventBatch, opts ...grpc.CallOption) (DataService_PublishBulkCBORClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_DataService_serviceDesc.Streams[1], "/libbeat.rpcdef.datareq.DataService/PublishBulkCBOR", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &dataServicePublishBulkCBORClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type DataService_PublishBulkCBORClient interface {
+	Recv() (*EventPublishResponse, error)
+	grpc.ClientStream
+}
+
+type dataServicePublishBulkCBORClient struct {
+	grpc.ClientStream
+}
+
+func (x *dataServicePublishBulkCBORClient) Recv() (*EventPublishResponse, error) {
+	m := new(EventPublishResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *dataServiceClient) PublishStream(ctx context.Context, opts ...grpc.CallOption) (DataService_PublishStreamClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_DataService_serviceDesc.Streams[1], "/libbeat.rpcdef.datareq.DataService/PublishStream", opts...)
+	stream, err := c.cc.NewStream(ctx, &_DataService_serviceDesc.Streams[2], "/libbeat.rpcdef.datareq.DataService/PublishStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +126,45 @@ func (x *dataServicePublishStreamClient) Recv() (*EventPublishResponse, error) {
 	return m, nil
 }
 
+func (c *dataServiceClient) PublishStreamCBOR(ctx context.Context, opts ...grpc.CallOption) (DataService_PublishStreamCBORClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_DataService_serviceDesc.Streams[3], "/libbeat.rpcdef.datareq.DataService/PublishStreamCBOR", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &dataServicePublishStreamCBORClient{stream}
+	return x, nil
+}
+
+type DataService_PublishStreamCBORClient interface {
+	Send(*RawEvent) error
+	Recv() (*EventPublishResponse, error)
+	grpc.ClientStream
+}
+
+type dataServicePublishStreamCBORClient struct {
+	grpc.ClientStream
+}
+
+func (x *dataServicePublishStreamCBORClient) Send(m *RawEvent) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *dataServicePublishStreamCBORClient) Recv() (*EventPublishResponse, error) {
+	m := new(EventPublishResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // DataServiceServer is the server API for DataService service.
 // All implementations must embed UnimplementedDataServiceServer
 // for forward compatibility
 type DataServiceServer interface {
 	PublishBulk(*EventPublishRequest, DataService_PublishBulkServer) error
+	PublishBulkCBOR(*RawEventBatch, DataService_PublishBulkCBORServer) error
 	PublishStream(DataService_PublishStreamServer) error
+	PublishStreamCBOR(DataService_PublishStreamCBORServer) error
 	mustEmbedUnimplementedDataServiceServer()
 }
 
@@ -108,8 +175,14 @@ type UnimplementedDataServiceServer struct {
 func (UnimplementedDataServiceServer) PublishBulk(*EventPublishRequest, DataService_PublishBulkServer) error {
 	return status.Errorf(codes.Unimplemented, "method PublishBulk not implemented")
 }
+func (UnimplementedDataServiceServer) PublishBulkCBOR(*RawEventBatch, DataService_PublishBulkCBORServer) error {
+	return status.Errorf(codes.Unimplemented, "method PublishBulkCBOR not implemented")
+}
 func (UnimplementedDataServiceServer) PublishStream(DataService_PublishStreamServer) error {
 	return status.Errorf(codes.Unimplemented, "method PublishStream not implemented")
+}
+func (UnimplementedDataServiceServer) PublishStreamCBOR(DataService_PublishStreamCBORServer) error {
+	return status.Errorf(codes.Unimplemented, "method PublishStreamCBOR not implemented")
 }
 func (UnimplementedDataServiceServer) mustEmbedUnimplementedDataServiceServer() {}
 
@@ -145,6 +218,27 @@ func (x *dataServicePublishBulkServer) Send(m *EventPublishResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _DataService_PublishBulkCBOR_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RawEventBatch)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DataServiceServer).PublishBulkCBOR(m, &dataServicePublishBulkCBORServer{stream})
+}
+
+type DataService_PublishBulkCBORServer interface {
+	Send(*EventPublishResponse) error
+	grpc.ServerStream
+}
+
+type dataServicePublishBulkCBORServer struct {
+	grpc.ServerStream
+}
+
+func (x *dataServicePublishBulkCBORServer) Send(m *EventPublishResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _DataService_PublishStream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(DataServiceServer).PublishStream(&dataServicePublishStreamServer{stream})
 }
@@ -171,6 +265,32 @@ func (x *dataServicePublishStreamServer) Recv() (*Event, error) {
 	return m, nil
 }
 
+func _DataService_PublishStreamCBOR_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DataServiceServer).PublishStreamCBOR(&dataServicePublishStreamCBORServer{stream})
+}
+
+type DataService_PublishStreamCBORServer interface {
+	Send(*EventPublishResponse) error
+	Recv() (*RawEvent, error)
+	grpc.ServerStream
+}
+
+type dataServicePublishStreamCBORServer struct {
+	grpc.ServerStream
+}
+
+func (x *dataServicePublishStreamCBORServer) Send(m *EventPublishResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *dataServicePublishStreamCBORServer) Recv() (*RawEvent, error) {
+	m := new(RawEvent)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 var _DataService_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "libbeat.rpcdef.datareq.DataService",
 	HandlerType: (*DataServiceServer)(nil),
@@ -182,8 +302,19 @@ var _DataService_serviceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
+			StreamName:    "PublishBulkCBOR",
+			Handler:       _DataService_PublishBulkCBOR_Handler,
+			ServerStreams: true,
+		},
+		{
 			StreamName:    "PublishStream",
 			Handler:       _DataService_PublishStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "PublishStreamCBOR",
+			Handler:       _DataService_PublishStreamCBOR_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
