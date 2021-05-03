@@ -29,10 +29,13 @@
 package log
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +47,7 @@ import (
 	file_helper "github.com/elastic/beats/v7/libbeat/common/file"
 	"github.com/elastic/beats/v7/libbeat/logp"
 	"github.com/elastic/beats/v7/libbeat/monitoring"
+	"github.com/elastic/beats/v7/libbeat/paths"
 
 	"github.com/elastic/beats/v7/filebeat/channel"
 	"github.com/elastic/beats/v7/filebeat/harvester"
@@ -350,9 +354,10 @@ func (h *Harvester) Run() error {
 		state := h.getState()
 		startingOffset := state.Offset
 		state.Offset += int64(message.Bytes)
+		msgLogger := logger.With("message_start_offset", startingOffset, "next_read_offset", state.Offset)
 
 		// Stop harvester in case of an error
-		if !h.onMessage(forwarder, state, message, startingOffset) {
+		if !h.onMessage(msgLogger, forwarder, state, message, startingOffset) {
 			return nil
 		}
 
@@ -411,6 +416,7 @@ func (h *Harvester) Stop() {
 // onMessage returns 'false' if it was interrupted in the process of sending the event.
 // This normally signals a harvester shutdown.
 func (h *Harvester) onMessage(
+	logger *logp.Logger,
 	forwarder *harvester.Forwarder,
 	state file.State,
 	message reader.Message,
@@ -425,8 +431,71 @@ func (h *Harvester) onMessage(
 		// No data or event is filtered out -> send empty event with state update
 		// only. The call can fail on filebeat shutdown.
 		// The event will be filtered out, but forwarded to the registry as is.
+		logger.Debugf("Empty message, send state update: %v", state)
 		err := forwarder.Send(beat.Event{Private: state})
 		return err == nil
+	}
+
+	// Support case notes:
+	// We expect the log to always include JSON + json parsing must be disabled, otherwise
+	// parsing might fail too ealy, and we can not check if parsing failed here.
+	// We do check here, in order to have the harvester state available and logged already.
+	//
+	// In case json parsing of the contents fails, we treat the log message as an error.
+	// On error:
+	// - Create path {path.log}/filebeat/incident/indicent_<timestamp>
+	// - Copy all {path.log}/filebeat/filebeat* to incident directory
+	// - Copy current log file and related log files to incident directory
+	if strings.Contains(h.source.Name(), "json") {
+		var any interface{}
+		if err := json.Unmarshal(message.Content, &any); err != nil {
+			logger.Errorf("Failed JSON test: '%v'", text)
+
+			// find base path for log files to collect. If ending is not '.log', we are already reading
+			// from a rotated file
+			harvesterFile := h.source.Name()
+			if ext := filepath.Ext(harvesterFile); ext != ".log" {
+				harvesterFile = harvesterFile[:len(harvesterFile)-len(ext)]
+			}
+
+			logsDir := paths.Paths.Logs
+			incidentDir := filepath.Join(logsDir, fmt.Sprintf("incident_%v", time.Now().UTC().Format(time.RFC3339)))
+			go func() {
+				time.Sleep(5 * time.Second)
+
+				// copy
+				if err := os.MkdirAll(incidentDir, 0777); err != nil {
+					logger.Errorf("failed to create incident dir: %v", err)
+					return
+				}
+
+				// copy filebeat logs
+				fblogs, err := filepath.Glob(filepath.Join(logsDir, "filebeat*"))
+				if err != nil {
+					logger.Errorf("Failed to find filebeat logs: %v", err)
+					return
+				}
+				for _, path := range fblogs {
+					basename := filepath.Base(path)
+					if err := copyFile(filepath.Join(incidentDir, basename), path); err != nil {
+						logger.Errorf("failed to copy filebeat log (%v): %v", path, err)
+					}
+				}
+
+				// copy collected logs
+				jsonLogs, err := filepath.Glob(fmt.Sprintf("%v*", harvesterFile))
+				if err != nil {
+					logger.Errorf("Failed to find user logs: %v", err)
+					return
+				}
+				for _, path := range jsonLogs {
+					basename := filepath.Base(path)
+					if err := copyFile(filepath.Join(incidentDir, basename), path); err != nil {
+						logger.Errorf("failed to copy user log (%v): %v", path, err)
+					}
+				}
+			}()
+		}
 	}
 
 	fields := common.MapStr{
@@ -460,7 +529,7 @@ func (h *Harvester) onMessage(
 				"_id": id,
 			}
 		}
-	} else if &text != nil {
+	} else {
 		if fields == nil {
 			fields = common.MapStr{}
 		}
@@ -704,4 +773,24 @@ func (h *Harvester) newLogFileReader() (reader.Reader, error) {
 	}
 
 	return readfile.NewLimitReader(r, h.config.MaxBytes), nil
+}
+
+func copyFile(to, from string) error {
+	fin, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: failed to open input file: %w", err)
+	}
+	defer fin.Close()
+
+	fout, err := os.Create(to)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: failed to create output file: %w", err)
+	}
+	defer fout.Close()
+
+	_, err = io.Copy(fout, fin)
+	if err != nil {
+		return fmt.Errorf("error while copying file: %w", err)
+	}
+	return nil
 }
