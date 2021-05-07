@@ -443,7 +443,7 @@ func (h *Harvester) onMessage(
 	//
 	// In case json parsing of the contents fails, we treat the log message as an error.
 	// On error:
-	// - Create path {path.log}/filebeat/incident/indicent_<timestamp>
+	// - Create path {path.log}/filebeat/incident/logs_indicent_<timestamp>
 	// - Copy all {path.log}/filebeat/filebeat* to incident directory
 	// - Copy current log file and related log files to incident directory
 	if strings.Contains(h.source.Name(), "json") {
@@ -459,7 +459,7 @@ func (h *Harvester) onMessage(
 			}
 
 			logsDir := paths.Paths.Logs
-			incidentDir := filepath.Join(logsDir, fmt.Sprintf("incident_%v", time.Now().UTC().Format(time.RFC3339)))
+			incidentDir := filepath.Join(logsDir, fmt.Sprintf("logs_incident_%v", time.Now().UTC().Format(time.RFC3339)))
 			go func() {
 				time.Sleep(5 * time.Second)
 

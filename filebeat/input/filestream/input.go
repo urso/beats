@@ -18,12 +18,18 @@
 package filestream
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"golang.org/x/text/transform"
 
 	"github.com/elastic/go-concert/ctxtool"
+	"github.com/scaleway/scaleway-sdk-go/logger"
 
 	loginp "github.com/elastic/beats/v7/filebeat/input/filestream/internal/input-logfile"
 	input "github.com/elastic/beats/v7/filebeat/input/v2"
@@ -33,6 +39,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/common/match"
 	"github.com/elastic/beats/v7/libbeat/feature"
 	"github.com/elastic/beats/v7/libbeat/logp"
+	"github.com/elastic/beats/v7/libbeat/paths"
 	"github.com/elastic/beats/v7/libbeat/reader"
 	"github.com/elastic/beats/v7/libbeat/reader/debug"
 	"github.com/elastic/beats/v7/libbeat/reader/readfile"
@@ -328,9 +335,73 @@ func (inp *filestream) readFromSource(
 		}
 
 		s.Offset += int64(message.Bytes)
+		text := string(message.Content)
 
-		if message.IsEmpty() || inp.isDroppedLine(log, string(message.Content)) {
+		if message.IsEmpty() || inp.isDroppedLine(log, text) {
+			log.Debugf("Empty message")
 			continue
+		}
+
+		// Support case notes:
+		// We expect the log to always include JSON + json parsing must be disabled, otherwise
+		// parsing might fail too ealy, and we can not check if parsing failed here.
+		// We do check here, in order to have the harvester state available and logged already.
+		//
+		// In case json parsing of the contents fails, we treat the log message as an error.
+		// On error:
+		// - Create path {path.log}/filebeat/incident/logs_indicent_<timestamp>
+		// - Copy all {path.log}/filebeat/filebeat* to incident directory
+		// - Copy current log file and related log files to incident directory
+		if strings.Contains(path, "json") {
+			var any interface{}
+			if err := json.Unmarshal(message.Content, &any); err != nil {
+				logger.Errorf("Failed JSON test: '%v'", text)
+
+				// find base path for log files to collect. If ending is not '.log', we are already reading
+				// from a rotated file
+				harvesterFile := path
+				if ext := filepath.Ext(harvesterFile); ext != ".log" {
+					harvesterFile = harvesterFile[:len(harvesterFile)-len(ext)]
+				}
+
+				logsDir := paths.Paths.Logs
+				incidentDir := filepath.Join(logsDir, fmt.Sprintf("filestream_incident_%v", time.Now().UTC().Format(time.RFC3339)))
+				go func() {
+					time.Sleep(5 * time.Second)
+
+					// copy
+					if err := os.MkdirAll(incidentDir, 0777); err != nil {
+						logger.Errorf("failed to create incident dir: %v", err)
+						return
+					}
+
+					// copy filebeat logs
+					fblogs, err := filepath.Glob(filepath.Join(logsDir, "filebeat*"))
+					if err != nil {
+						logger.Errorf("Failed to find filebeat logs: %v", err)
+						return
+					}
+					for _, path := range fblogs {
+						basename := filepath.Base(path)
+						if err := copyFile(filepath.Join(incidentDir, basename), path); err != nil {
+							logger.Errorf("failed to copy filebeat log (%v): %v", path, err)
+						}
+					}
+
+					// copy collected logs
+					jsonLogs, err := filepath.Glob(fmt.Sprintf("%v*", harvesterFile))
+					if err != nil {
+						logger.Errorf("Failed to find user logs: %v", err)
+						return
+					}
+					for _, path := range jsonLogs {
+						basename := filepath.Base(path)
+						if err := copyFile(filepath.Join(incidentDir, basename), path); err != nil {
+							logger.Errorf("failed to copy user log (%v): %v", path, err)
+						}
+					}
+				}()
+			}
 		}
 
 		event := inp.eventFromMessage(message, path)
@@ -399,4 +470,24 @@ func (inp *filestream) eventFromMessage(m reader.Message, path string) beat.Even
 		Meta:      m.Meta,
 		Fields:    m.Fields,
 	}
+}
+
+func copyFile(to, from string) error {
+	fin, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: failed to open input file: %w", err)
+	}
+	defer fin.Close()
+
+	fout, err := os.Create(to)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: failed to create output file: %w", err)
+	}
+	defer fout.Close()
+
+	_, err = io.Copy(fout, fin)
+	if err != nil {
+		return fmt.Errorf("error while copying file: %w", err)
+	}
+	return nil
 }
